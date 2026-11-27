@@ -50,6 +50,10 @@ func (f *fakeLiteLLM) DeregisterPassThrough(context.Context, string) error {
 
 func (f *fakeLiteLLM) DeregisterModel(context.Context, string) error { return f.call("model") }
 
+func (f *fakeLiteLLM) GetModelInfo(context.Context, string) (*catalogclient.LiteLLMModelInfoResponse, error) {
+	return &catalogclient.LiteLLMModelInfoResponse{}, nil
+}
+
 // fakeDeleter is a Deleter that records the call, fails with err, or panics.
 type fakeDeleter struct {
 	log      *callLog
@@ -116,11 +120,11 @@ func newTestExecutor(log *callLog, failOn string, compRepo *fakeComponentRepo, c
 	}
 }
 
-func TestNewExecutor_RegistersPodmanDeleter(t *testing.T) {
+func TestNewExecutor_RegistersDeleters(t *testing.T) {
 	e := NewExecutor(&fakeComponentRepo{}, &fakeConnectorRepo{}, &fakeLiteLLM{log: &callLog{}})
 
 	assert.Contains(t, e.deleters, runtimeTypes.RuntimeTypePodman)
-	assert.NotContains(t, e.deleters, runtimeTypes.RuntimeTypeOpenShift, "models are not supported on openshift")
+	assert.Contains(t, e.deleters, runtimeTypes.RuntimeTypeOpenShift)
 }
 
 func TestExecutor_ExecuteLocal(t *testing.T) {

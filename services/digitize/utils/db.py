@@ -100,7 +100,7 @@ async def acquire_import_export_lock() -> bool:
         import os
 
         pid = os.getpid()
-        logger.info(f"[PID {pid}] Attempting to acquire import/export lock...")
+        logger.debug(f"[PID {pid}] Attempting to acquire import/export lock")
 
         if not engine:
             logger.error(f"[PID {pid}] Database engine not initialized")
@@ -120,12 +120,12 @@ async def acquire_import_export_lock() -> bool:
             if result:
                 # Lock acquired - store connection to keep it alive
                 _import_export_lock_connection = conn
-                logger.warning(f"[PID {pid}] ✅ Import/export lock ACQUIRED successfully")
+                logger.debug(f"[PID {pid}] Import/export lock acquired")
                 return True
             else:
                 # Lock not acquired - close connection
                 conn.close()
-                logger.warning(f"[PID {pid}] ❌ Import/export lock ALREADY HELD by another process")
+                logger.warning(f"[PID {pid}] Import/export lock is held by another process")
                 return False
         except Exception as e:
             logger.error(f"[PID {pid}] Failed to acquire import/export lock: {e}", exc_info=True)
@@ -148,7 +148,7 @@ async def release_import_export_lock():
         import os
 
         pid = os.getpid()
-        logger.info(f"[PID {pid}] Releasing import/export lock...")
+        logger.debug(f"[PID {pid}] Releasing import/export lock")
 
         try:
             if _import_export_lock_connection:
@@ -156,7 +156,7 @@ async def release_import_export_lock():
                 _import_export_lock_connection.execute(text("SELECT pg_advisory_unlock(123456789)"))
                 _import_export_lock_connection.close()
                 _import_export_lock_connection = None
-                logger.warning(f"[PID {pid}] ✅ Import/export lock RELEASED successfully")
+                logger.debug(f"[PID {pid}] Import/export lock released")
             else:
                 logger.warning(f"[PID {pid}] No lock connection to release")
         except Exception as e:
@@ -628,7 +628,7 @@ def get_all_job_ids() -> list[str]:
                 break
 
         job_ids = [job.job_id for job in all_jobs]
-        logger.info(f"Found {len(job_ids)} job IDs in database")
+        logger.debug(f"Found {len(job_ids)} job IDs in database")
         return job_ids
     except Exception as e:
         logger.error(f"Failed to read job IDs from database: {e}", exc_info=True)
@@ -660,7 +660,7 @@ def get_all_document_ids() -> list[str]:
                 break
 
         doc_ids = [doc.doc_id for doc in all_documents]
-        logger.info(f"Found {len(doc_ids)} document IDs in database")
+        logger.debug(f"Found {len(doc_ids)} document IDs in database")
         return doc_ids
     except Exception as e:
         logger.error(f"Failed to read document IDs from database: {e}", exc_info=True)
@@ -834,7 +834,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
                 total_exported=len(exported_jobs),
                 completed=sum(
                     1 for job in exported_jobs
-                    if job.status in (JobStatus.COMPLETED.value, JobStatus.COMPLETED_WITH_ERRORS.value)
+                    if job.status == JobStatus.COMPLETED.value
                 ),
                 failed=sum(1 for job in exported_jobs if job.status == JobStatus.FAILED.value),
             ),
@@ -842,7 +842,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
                 total_exported=len(exported_documents),
                 completed=sum(
                     1 for doc in exported_documents
-                    if doc.status in (DocStatus.COMPLETED.value, DocStatus.COMPLETED_WITH_ERRORS.value)
+                    if doc.status == DocStatus.COMPLETED.value
                 ),
                 failed=sum(1 for doc in exported_documents if doc.status == DocStatus.FAILED.value),
             ),
@@ -1249,7 +1249,6 @@ class DatabaseStatusManager:
             JobStatus.FAILED,
             JobStatus.CANCELLED,
             JobStatus.CANCEL_PENDING,
-            JobStatus.COMPLETED_WITH_ERRORS,
         }
         current_db_status = JobStatus(job.status) if job.status in JobStatus._value2member_map_ else None
         if current_db_status in protected_statuses and job_status not in protected_statuses:
@@ -1264,13 +1263,11 @@ class DatabaseStatusManager:
         documents = db_manager.get_documents_by_job_id(self.job_id)
 
         # Recalculate statistics.
-        # ALREADY_EXISTS, SKIPPED and COMPLETED_WITH_ERRORS are all terminal success
-        # states; count them with completed.
+        # ALREADY_EXISTS and SKIPPED are terminal success states; count them with completed.
         _terminal_ok = (
             DocStatus.COMPLETED.value,
             DocStatus.ALREADY_EXISTS.value,
             DocStatus.SKIPPED.value,
-            DocStatus.COMPLETED_WITH_ERRORS.value,
         )
         stats = {
             "total_documents": len(documents),
@@ -1300,11 +1297,11 @@ class DatabaseStatusManager:
         }
 
         # Set completed_at if job is finished
-        if job_status in [JobStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS, JobStatus.FAILED, JobStatus.CANCELLED]:
+        if job_status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED]:
             update_params["completed_at"] = datetime.now(timezone.utc)
 
-        # Set error for hard failures and completed_with_errors (when an error message is provided)
-        if error and job_status in (JobStatus.FAILED, JobStatus.COMPLETED_WITH_ERRORS):
+        # Set error for hard failures (when an error message is provided)
+        if error and job_status == JobStatus.FAILED:
             update_params["error"] = error
 
         # Perform database update
@@ -1342,7 +1339,7 @@ def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict
     Returns:
         Tuple of (metadata_fields, top_level_fields)
     """
-    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "existing_doc_id", "existing_doc_name", "had_table_failures"}
+    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "existing_doc_id", "existing_doc_name"}
 
     metadata_fields = {
         k: v if k == "timing_in_secs" and isinstance(v, dict) else _extract_value(v)

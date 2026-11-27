@@ -25,7 +25,7 @@ class ForecastConfig(BaseSettings):
 
     scratch_dir: Path = Field(
         default=Path("/var/cache/forecast/scratch"),
-        description="Local training scratch, not shared",
+        description="Local scratch of a run (data file, model directory, AutoGluon files), not shared",
     )
 
     data_dir: Path = Field(
@@ -80,25 +80,13 @@ class ForecastConfig(BaseSettings):
     training_max_attempts: int = Field(
         default=2,
         ge=1,
-        description="Attempts of the worker step per job, the first one included",
+        description="Attempts per job (loader, then worker), the first one included",
     )
 
     training_retry_delay_seconds: int = Field(
         default=60,
         ge=0,
         description="Wait between two attempts of the same job",
-    )
-
-    max_queued_jobs: int = Field(
-        default=10,
-        ge=1,
-        description="Queued jobs accepted before POST /v1/connectors returns 429",
-    )
-
-    max_training_rows: int = Field(
-        default=10_000_000,
-        ge=1,
-        description="Largest row count a job may train on",
     )
 
     max_inference_rows: int = Field(
@@ -113,10 +101,40 @@ class ForecastConfig(BaseSettings):
         description="Rows per chunk when streaming the source to scratch",
     )
 
-    worker_memory_limit_mb: Optional[int] = Field(
-        default=None,
+    parquet_compression: str = Field(
+        default="snappy",
+        description="Parquet compression codec for data extracted to scratch",
+    )
+
+    # Db2 for i connectors (Mapepire)
+    mapepire_port: int = Field(
+        default=8076,
         ge=1,
-        description="Hard memory cap applied to the worker subprocess; unset until benchmarked",
+        le=65535,
+        description="Mapepire daemon port used when the connector does not specify one",
+    )
+
+    connector_connect_timeout_s: int = Field(
+        default=30,
+        ge=1,
+        description="Timeout for opening a connection to the source database",
+    )
+
+    connector_query_timeout_s: int = Field(
+        default=3600,
+        ge=1,
+        description="Timeout for a streaming extraction query on the source database",
+    )
+
+    # 2048 MB is the value measured on the ppc64le target. The worker's memory grows with the table
+    # and the design sets no row limit, so a table that needs more fails once it passes the cap.
+    # It must stay below the container's memory limit. An empty WORKER_MEMORY_LIMIT_MB removes the cap.
+    # NOTE: Nothing applies the cap yet. The API orchestration (Story 7) is meant to set it on the
+    # worker subprocess, and the worker only logs its peak memory ("peak memory MB", training/main.py).
+    worker_memory_limit_mb: Optional[int] = Field(
+        default=2048,
+        ge=1,
+        description="Hard memory cap in MB applied to the worker subprocess; empty means no cap",
     )
 
     # Restricted database role used by the worker subprocess

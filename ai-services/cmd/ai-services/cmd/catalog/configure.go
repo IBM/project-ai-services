@@ -10,9 +10,9 @@ import (
 
 	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/catalogns"
 	catalogOpenShift "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/openshift"
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
-	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -63,7 +63,7 @@ const (
 var configureCmd = &cobra.Command{
 	Use:   "configure",
 	Short: "Configure the catalog service",
-	Long: `Configure and deploy the AI Services catalog service with the specified runtime.
+	Long: `Configure and deploy the AI Launchpad catalog service with the specified runtime.
 
 This command performs the following operations:
 	 - Deploys the catalog services
@@ -179,7 +179,7 @@ func runConfigure(ctx context.Context) error {
 
 	case types.RuntimeTypeOpenShift:
 		opts := catalogUtils.OpenShiftConfigureOptions{
-			Namespace:       catalogConstants.CatalogAppName,
+			Namespace:       catalogns.Get(),
 			Timeout:         timeout,
 			SkipLocalWorker: skipLocalWorkerFlag,
 		}

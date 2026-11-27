@@ -30,7 +30,8 @@ Arguments:
 
 Supported targets:
   - opensearch: Restore OpenSearch indices and data (Podman and OpenShift)
-  - digitize:   Restore digitize metadata (jobs and documents) (Podman and OpenShift)
+  - digitize:   Restore digitization and ingestion metadata (jobs, documents and checksums)
+                along with the digitized output files (json/md/txt), if present in the backup (Podman and OpenShift)
 
 Note:
   - WARNING: Restore will overwrite existing data`,

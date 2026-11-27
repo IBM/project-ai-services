@@ -26,7 +26,13 @@ type CellRendererComponent = (
   props: CellRendererProps,
 ) => React.ReactElement | null;
 
-// Renders the instance name as a link that opens the model details panel
+// Statuses where the model details page is viewable (local running models and remote connected models)
+const CLICKABLE_STATUSES: ReadonlySet<string> = new Set([
+  DEPLOYMENT_STATUS.RUNNING,
+  DEPLOYMENT_STATUS.CONNECTED,
+]);
+
+// Renders the instance name as a link to the model details; clickable for Running and connected models
 export const NameCell = ({
   value,
   rowId,
@@ -37,7 +43,10 @@ export const NameCell = ({
     value={value}
     rowId={rowId}
     rowData={rowData}
-    isLinkEnabled={!!onRowClick}
+    isLinkEnabled={
+      !!onRowClick &&
+      Boolean(rowData?.status && CLICKABLE_STATUSES.has(rowData.status))
+    }
     onNameClick={
       onRowClick && rowData
         ? () => onRowClick(rowData as ModelDeploymentRow)
@@ -54,7 +63,10 @@ export const ActionCell = ({ rowId, rowData }: CellRendererProps) => (
       // TODO: Wire delete once the DELETE API is integrated.
     }}
     isDeleteEnabled={(status) =>
-      status === DEPLOYMENT_STATUS.RUNNING || status === DEPLOYMENT_STATUS.ERROR
+      status === DEPLOYMENT_STATUS.RUNNING ||
+      status === DEPLOYMENT_STATUS.CONNECTED ||
+      status === DEPLOYMENT_STATUS.ERROR ||
+      status === DEPLOYMENT_STATUS.OFFLINE
     }
   />
 );

@@ -2,6 +2,7 @@ package deployment
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -9,15 +10,19 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/repository/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/routes"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/profiles"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const (
@@ -26,6 +31,9 @@ const (
 
 	// watsonxTokenizeURL is the tokenize passthrough target for watsonx remote models.
 	watsonxTokenizeURL = "http://localhost:4000/watsonx/ml/v1/text/tokenization"
+
+	// openAIAPIPath is the path under which OpenAI-style servers (e.g. vLLM) serve their API.
+	openAIAPIPath = "/v1"
 )
 
 // ModelPlanner plans model deployments by:
@@ -50,7 +58,8 @@ func NewModelPlanner(provider *catalog.CatalogProvider, workers worker.Resolver)
 		models:          helpers.New(provider),
 		workers:         workers,
 		deployers: map[runtimeTypes.RuntimeType]types.Deployer{
-			runtimeTypes.RuntimeTypePodman: podman.NewPodmanDeployer(),
+			runtimeTypes.RuntimeTypePodman:    podman.NewPodmanDeployer(routes.NewManager(workers)),
+			runtimeTypes.RuntimeTypeOpenShift: openshift.NewOpenShiftDeployer(),
 		},
 	}
 }
@@ -69,14 +78,11 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 	workerName := worker.DefaultName(req.WorkerName)
 
 	// Resolving the runtime up front means an unreachable worker fails the request (422)
-	// instead of leaving a component row stuck in Deploying.
-	rt, err := p.workers.NewRuntime(ctx, workerName, "")
+	// instead of leaving a component row stuck in Deploying. On OpenShift the runtime is scoped
+	// to the shared models namespace; Podman ignores it.
+	rt, err := p.workers.NewRuntime(ctx, workerName, catalogutils.ModelsNamespace())
 	if err != nil {
 		return nil, validators.Unprocessable("cannot reach worker %q: %v", workerName, err)
-	}
-
-	if rt.Type() == runtimeTypes.RuntimeTypeOpenShift {
-		return nil, validators.BadRequest("models are unsupported on openshift runtime")
 	}
 
 	deployer, ok := p.deployers[rt.Type()]
@@ -112,6 +118,12 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 		workerID = &id
 	}
 
+	values, err := loadLocalValues(provider, req)
+	if err != nil {
+		return nil, err
+	}
+	values[constants.InstanceSlugKey] = catalogutils.GenerateInstanceSlug(componentID.String())
+
 	plan := &types.LocalPlan{
 		ComponentID:  componentID,
 		Req:          req,
@@ -131,7 +143,7 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 		},
 		Metadata: localComponentMetadata(req, sensitive),
 		Catalog:  provider,
-		Values:   loadLocalValues(provider, req),
+		Values:   values,
 	}
 
 	// Reject what the worker cannot host (e.g. not enough free Spyre cards) now, instead of after
@@ -159,25 +171,24 @@ func localComponentMetadata(req apimodels.CreateModelRequest, sensitive map[stri
 	return md
 }
 
-// loadLocalValues builds the template values: the provider's defaults overridden by the request
-// params, plus the requested model.
-func loadLocalValues(provider *catalog.CatalogProvider, req apimodels.CreateModelRequest) map[string]any {
-	// A provider without a values file is valid: fall back to request-only values.
-	values, err := provider.LoadComponentValues(req.ComponentType, req.ProviderID, map[string]string{})
-	if err != nil || values == nil {
-		values = make(map[string]any)
+// loadLocalValues builds the template values: the provider's defaults, the request params, the
+// requested model and its hardware profile (the requested one, else the model's default).
+// An unknown model or profile is a 400.
+func loadLocalValues(provider *catalog.CatalogProvider, req apimodels.CreateModelRequest) (map[string]any, error) {
+	argParams := utils.FlattenMapWithValues(req.Params, "")
+	values, err := provider.LoadComponentValuesForModel(req.ComponentType, req.ProviderID, req.Model, req.Profile, argParams)
+	if errors.Is(err, catalog.ErrModelNotSupported) || errors.Is(err, profiles.ErrNotSupported) {
+		return nil, validators.BadRequest("%v", err)
 	}
 
-	maps.Copy(values, req.Params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load values for %s/%s: %w", req.ComponentType, req.ProviderID, err)
+	}
 
-	// The templates read the model as .Values.model; it is a top-level request field, not a param.
+	// The templates read the model as .Values.model; the top-level request field wins over a param.
 	values[valuesKeyModel] = req.Model
 
-	// TODO(profiles): validate req.Profile against the provider's profiles.yaml (404/400 when
-	// unknown) and resolve it into concrete deployment settings (context length, resources, ...)
-	// that get merged into values here.
-
-	return values
+	return values, nil
 }
 
 // PlanRemote validates a remote-model request against the provider's schema and builds its route.
@@ -194,15 +205,27 @@ func (p *ModelPlanner) PlanRemote(ctx context.Context, req apimodels.CreateModel
 
 	connectorID := uuid.New()
 
+	// req is a copy, but its Params map is the caller's. Work on a clone so the normalization
+	// below never mutates the caller's input (planning has no side effects); the plan carries it.
+	req.Params = maps.Clone(req.Params)
+
 	// The params were validated against the provider's schema.json, so they are forwarded to
-	// LiteLLM as is: a field added to the schema reaches the gateway without a code change.
+	// LiteLLM as is (apart from the platform-side maxBatchSize, which is kept as metadata only,
+	// and whatever the provider normalizes, e.g. the vLLM api_base): a field added to the schema
+	// reaches the gateway without a code change.
+	routeParams := maps.Clone(req.Params)
+	delete(routeParams, constants.ParamMaxBatchSize)
+
+	provider := remoteProviderFor(req.ProviderID)
+	provider.NormalizeParams(req.Params, routeParams)
+
 	r := litellm.Route{
 		Tag:           connectorID.String(),
 		Provider:      req.ProviderID,
 		Mode:          mode,
 		Model:         req.Model,
 		UpstreamModel: fmt.Sprintf("%s/%s", req.ProviderID, req.Model),
-		Params:        maps.Clone(req.Params),
+		Params:        routeParams,
 	}
 	// A tokenize passthrough is registered by default. A provider whose endpoint cannot be
 	// reached at the resolved target will cause registration to fail.
@@ -216,7 +239,7 @@ func (p *ModelPlanner) PlanRemote(ctx context.Context, req apimodels.CreateModel
 		constants.MetadataKeyParams:        catalogutils.StripSensitiveFields(req.Params, sensitive),
 	}
 
-	return &types.RemotePlan{ConnectorID: connectorID, Req: req, Route: r, Metadata: metadata}, nil
+	return &types.RemotePlan{ConnectorID: connectorID, Req: req, Route: r, Provider: provider, Metadata: metadata}, nil
 }
 
 // remoteTokenizeURL returns the target of the tokenize passthrough for a remote provider, or ""
@@ -227,14 +250,19 @@ func remoteTokenizeURL(providerID string, params map[string]any) string {
 		return watsonxTokenizeURL
 	}
 
-	if apiBase, _ := params[litellm.ParamAPIBase].(string); apiBase != "" {
+	if apiBase, _ := params[constants.ParamAPIBase].(string); apiBase != "" {
 		return tokenizeURL(apiBase)
 	}
 
 	return ""
 }
 
+// bareAPIBase strips any trailing slashes and a trailing openAIAPIPath from an OpenAI-style api_base.
+func bareAPIBase(apiBase string) string {
+	return strings.TrimSuffix(strings.TrimRight(apiBase, "/"), openAIAPIPath)
+}
+
 // tokenizeURL derives the /tokenize target from an OpenAI-style api_base.
 func tokenizeURL(apiBase string) string {
-	return strings.TrimSuffix(strings.TrimRight(apiBase, "/"), "/v1") + "/tokenize"
+	return bareAPIBase(apiBase) + "/tokenize"
 }

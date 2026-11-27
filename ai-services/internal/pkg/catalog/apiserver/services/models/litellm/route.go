@@ -12,11 +12,6 @@ func PublicKeyAlias(model string, id uuid.UUID) string {
 	return fmt.Sprintf("%s-%s", model, id)
 }
 
-// ParamAPIBase is the litellm_params key of the model endpoint. It is the only provider param
-// the platform interprets itself (to derive the /tokenize target); every other param is
-// forwarded to LiteLLM untouched.
-const ParamAPIBase = "api_base"
-
 // Route describes how one model is exposed through the LiteLLM gateway. Both local pods and remote
 // connectors are described by a route, so they share the same register/probe/rollback logic.
 type Route struct {

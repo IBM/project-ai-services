@@ -1,0 +1,14 @@
+@use "carbonTokens" as *;
+
+.componentTypeBadge {
+  @include type-style("label-01");
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-02;
+  color: var(--cds-text-primary);
+}
+
+.checkIcon {
+  color: var(--cds-support-success);
+  flex-shrink: 0;
+}

@@ -13,7 +13,7 @@ Tests cover:
 """
 
 import logging
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -292,8 +292,10 @@ def test_settings_defaults(monkeypatch):
         "MODEL_REPO_PATH", "SCRATCH_DIR", "DATA_DIR", "TRITON_URL", "TRITON_STARTUP_WAIT_S",
         "TRITON_LOAD_TIMEOUT_S", "TRITON_INFER_TIMEOUT_S", "FORECASTER_RETENTION_COUNT",
         "DEFAULT_TIME_LIMIT_SECONDS", "TRAINING_MAX_ATTEMPTS",
-        "TRAINING_RETRY_DELAY_SECONDS", "MAX_QUEUED_JOBS", "MAX_TRAINING_ROWS",
+        "TRAINING_RETRY_DELAY_SECONDS",
         "MAX_INFERENCE_ROWS", "LOADER_CHUNK_ROWS", "WORKER_MEMORY_LIMIT_MB",
+        "PARQUET_COMPRESSION", "MAPEPIRE_PORT",
+        "CONNECTOR_CONNECT_TIMEOUT_S", "CONNECTOR_QUERY_TIMEOUT_S",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -323,29 +325,29 @@ def test_settings_defaults(monkeypatch):
     assert config.default_time_limit_seconds == 1800
     assert config.training_max_attempts == 2
     assert config.training_retry_delay_seconds == 60
-    assert config.max_queued_jobs == 10
-    assert config.max_training_rows == 10_000_000
     assert config.max_inference_rows == 5000
     assert config.loader_chunk_rows == 100_000
-    assert config.worker_memory_limit_mb is None
+    assert config.parquet_compression == "snappy"
+    assert config.mapepire_port == 8076
+    assert config.connector_connect_timeout_s == 30
+    assert config.connector_query_timeout_s == 3600
+    assert config.worker_memory_limit_mb == 2048
 
 
 @pytest.mark.unit
 def test_settings_read_the_environment(monkeypatch):
     monkeypatch.setenv("TRAINING_MAX_ATTEMPTS", "1")
-    monkeypatch.setenv("MAX_QUEUED_JOBS", "3")
     monkeypatch.setenv("WORKER_MEMORY_LIMIT_MB", "4096")
 
     from forecast.settings import ForecastConfig
 
     config = ForecastConfig()
     assert config.training_max_attempts == 1
-    assert config.max_queued_jobs == 3
     assert config.worker_memory_limit_mb == 4096
 
 
 @pytest.mark.unit
-def test_blank_memory_limit_means_unset(monkeypatch):
+def test_blank_memory_limit_removes_the_cap(monkeypatch):
     monkeypatch.setenv("WORKER_MEMORY_LIMIT_MB", "  ")
 
     from forecast.settings import ForecastConfig
@@ -419,17 +421,20 @@ def test_key_error_message_does_not_contain_the_key():
 
 @pytest.mark.unit
 @pytest.mark.parametrize("key", ["", "x" * 31])
-def test_startup_fails_fast_without_a_valid_key(key):
-    from forecast.utils.encryption import EncryptionKeyError
+def test_startup_continues_without_a_valid_key_and_logs_an_error(key, caplog):
     import forecast.app as forecast_app
     from forecast.settings import settings
 
     with patch.object(forecast_app, "close_db_connections"), patch.object(
         settings.forecast, "db_encryption_key", SecretStr(key)
-    ):
-        with pytest.raises(EncryptionKeyError):
-            with TestClient(forecast_app.app):
-                pass
+    ), caplog.at_level("ERROR"):
+        # The service is up, so that POST /v1/connectors can store a FAILED connector.
+        with TestClient(forecast_app.app) as client:
+            assert client.get("/health").status_code == 200
+
+    errors = [record.getMessage() for record in caplog.records if record.levelno >= logging.ERROR]
+    assert any("Connectors cannot be accepted until it is fixed" in message for message in errors)
+    assert not any(key and key in message for message in errors)
 
 
 @pytest.mark.unit
@@ -443,6 +448,31 @@ def test_startup_logs_no_error_with_a_valid_key(caplog):
         with TestClient(forecast_app.app):
             pass
     assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+@pytest.mark.unit
+def test_shutdown_closes_the_triton_client():
+    import forecast.app as forecast_app
+
+    with patch.object(forecast_app, "close_db_connections"), patch.object(
+        forecast_app, "close_client", new_callable=AsyncMock
+    ) as close_client:
+        with TestClient(forecast_app.app):
+            close_client.assert_not_awaited()
+    close_client.assert_awaited_once()
+
+
+@pytest.mark.unit
+def test_shutdown_closes_the_database_when_the_triton_client_fails_to_close(caplog):
+    import forecast.app as forecast_app
+
+    with patch.object(forecast_app, "close_db_connections") as close_db, patch.object(
+        forecast_app, "close_client", new_callable=AsyncMock, side_effect=RuntimeError("boom")
+    ), caplog.at_level("ERROR"):
+        with TestClient(forecast_app.app):
+            pass
+    close_db.assert_called_once()
+    assert "Error closing the Triton client" in caplog.text
 
 
 @pytest.mark.unit
@@ -503,6 +533,20 @@ def test_startup_continues_when_the_thread_limiter_cannot_be_set(caplog):
 
 
 @pytest.mark.unit
+def test_startup_sets_the_umask_so_that_triton_can_read_what_is_published():
+    import os
+
+    import forecast.app as forecast_app
+
+    before = os.umask(0o077)
+    try:
+        with patch.object(forecast_app, "close_db_connections"):
+            with TestClient(forecast_app.app):
+                assert os.umask(0o022) == 0o022
+    finally:
+        os.umask(before)
+
+
 def test_startup_caps_the_thread_limiter_to_the_database_pool():
     import forecast.app as forecast_app
     from forecast.settings import settings
@@ -600,22 +644,18 @@ def test_startup_fails_on_a_bad_triton_url_without_echoing_it():
 
 @pytest.mark.unit
 def test_worker_requires_a_job_id():
-    from forecast.triton_client.worker import parse_args
+    from forecast.training.main import parse_args
 
     with pytest.raises(SystemExit):
         parse_args([])
 
 
 @pytest.mark.unit
-def test_worker_parses_the_job_id():
-    from forecast.triton_client.worker import parse_args
+def test_worker_parses_the_job_id_the_input_and_the_output():
+    from pathlib import Path
 
-    assert parse_args(["42"]).job_id == 42
+    from forecast.training.main import parse_args
 
+    args = parse_args(["42", "data.parquet", "out/model"])
 
-@pytest.mark.unit
-def test_worker_exits_non_zero_until_implemented(capsys):
-    from forecast.triton_client.worker import main
-
-    assert main(["1"]) == 1
-    assert "not implemented" in capsys.readouterr().err
+    assert (args.job_id, args.data_path, args.output_dir) == (42, Path("data.parquet"), Path("out/model"))

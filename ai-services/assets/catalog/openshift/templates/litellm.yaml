@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "litellm"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: litellm
+spec:
+  replicas: 1
+  minReadySeconds: 10
+  selector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: litellm
+  template:
+    metadata:
+      labels:
+        ai-services.io/application: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+        ai-services.io/component: litellm
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: litellm-proxy
+          image: "{{ .Values.litellm.image }}"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              export DATABASE_URL="postgresql://{{ .Values.litellm.db.user }}:${DB_PASSWORD}@litellm-db:5432/{{ .Values.litellm.db.database }}"
+              exec litellm --config /app/config.yaml --port {{ .Values.litellm.port }}
+          env:
+            - name: STORE_MODEL_IN_DB
+              value: "True"
+            - name: LITELLM_DATABASE_CONNECTION_RETRIES
+              value: "{{ .Values.litellm.dbConnectionRetries }}"
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-secret
+                  key: master-key
+            - name: LITELLM_SALT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-secret
+                  key: salt-key
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-db-secret
+                  key: db-password
+          ports:
+            - name: http
+              containerPort: {{ .Values.litellm.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health/liveness
+              port: {{ .Values.litellm.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: {{ .Values.litellm.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "{{ .Values.litellm.resources.requests.memory }}"
+              cpu: "{{ .Values.litellm.resources.requests.cpu }}"
+            limits:
+              memory: "{{ .Values.litellm.resources.limits.memory }}"
+              cpu: "{{ .Values.litellm.resources.limits.cpu }}"

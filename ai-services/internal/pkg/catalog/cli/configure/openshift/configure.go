@@ -9,6 +9,7 @@ import (
 	"helm.sh/helm/v4/pkg/chart"
 
 	"github.com/project-ai-services/ai-services/assets"
+	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	configureutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -77,12 +78,12 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 
 	logger.Infoln("-------")
 
-	// Step 7: Login to catalog API, join as local worker, print next steps
+	// Step 7: Login to catalog API, join as local worker, deploy model prerequisites, print next steps
 	return handlePostDeployment(ctx, tp, runtime, opts, adminPassword, secretExists)
 }
 
 // handlePostDeployment logs in to the catalog API (verifying the admin password),
-// optionally joins the local worker, and prints next steps.
+// optionally joins the local worker, deploys model prerequisites, and prints next steps.
 func handlePostDeployment(ctx context.Context, tp templates.Template, runtime *runtimeOpenshift.OpenshiftClient, opts catalogutils.OpenShiftConfigureOptions, adminPassword string, isReinstall bool) error {
 	// Login to the catalog API — this both verifies the admin password and gives
 	// us a client to reuse for local worker registration without a second login.
@@ -101,10 +102,14 @@ func handlePostDeployment(ctx context.Context, tp templates.Template, runtime *r
 		return err
 	}
 
-	// Step 8: Join as local worker
+	// Step 8: Join as local worker and deploy model prerequisites
 	if !opts.SkipLocalWorker {
 		if err := JoinAsLocalWorker(ctx, runtime, catalogClient); err != nil {
 			return fmt.Errorf("worker join failed: %w", err)
+		}
+
+		if err := deployModelsPrerequisites(ctx); err != nil {
+			return err
 		}
 	}
 
@@ -191,6 +196,23 @@ func deployCatalogHelm(ctx context.Context, chartData chart.Charter, timeout tim
 	}
 
 	s.Stop("Catalog deployed successfully")
+
+	return nil
+}
+
+func deployModelsPrerequisites(ctx context.Context) error {
+	s := spinner.New("Deploying model prerequisites to OpenShift...")
+
+	s.Start(ctx)
+
+	helmManager := helm.NewLocalHelmManager(catalogconstants.CatalogModelsNamespace)
+	if err := openshiftutils.DeployPrerequisites(ctx, helmManager); err != nil {
+		s.Fail("failed to deploy model prerequisites")
+
+		return fmt.Errorf("failed to deploy model prerequisites: %w", err)
+	}
+
+	s.Stop("Model prerequisites deployed successfully")
 
 	return nil
 }

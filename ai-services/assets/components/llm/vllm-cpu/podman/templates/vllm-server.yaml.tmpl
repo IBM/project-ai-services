@@ -56,9 +56,9 @@ spec:
         value: "32"
       resources:
         requests:
-          memory: "150Gi"
+          memory: "{{ .Values.resources.memory }}"
         limits:
-          memory: "150Gi"
+          memory: "{{ .Values.resources.memory }}"
       ports:
         - containerPort: 8000
       volumeMounts:

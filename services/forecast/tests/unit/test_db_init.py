@@ -193,7 +193,6 @@ class TestWorkerRole:
             'REVOKE ALL ON ALL TABLES IN SCHEMA public FROM "forecast_worker"',
             'GRANT CONNECT ON DATABASE "forecast_metadata" TO "forecast_worker"',
             'GRANT USAGE ON SCHEMA public TO "forecast_worker"',
-            'GRANT SELECT ON connectors TO "forecast_worker"',
             'GRANT SELECT ON training_configs TO "forecast_worker"',
             'GRANT SELECT (seq, connector_id, status) ON jobs TO "forecast_worker"',
             'GRANT UPDATE (result, message) ON jobs TO "forecast_worker"',

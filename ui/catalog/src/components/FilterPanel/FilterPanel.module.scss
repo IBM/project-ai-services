@@ -1,0 +1,76 @@
+@use "carbonTokens" as *;
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 20rem;
+  align-self: flex-start;
+  width: 20rem;
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 340px);
+  background: $layer-01;
+  border-inline-end: 1px solid $layer-accent-01;
+}
+
+.heading {
+  padding-inline-start: $spacing-05;
+  border-block-end: 1px solid $layer-accent-01;
+}
+
+.title {
+  padding: $spacing-05 0;
+  @include type-style("heading-compact-02");
+}
+
+.content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 $spacing-05 $spacing-05;
+  overscroll-behavior: contain;
+}
+
+.accordion {
+  :global(.cds--accordion__title) {
+    margin: 0;
+  }
+
+  :global(.cds--accordion__arrow) {
+    margin: 0.125rem 0 0;
+  }
+
+  :global(.cds--accordion__content) {
+    padding-inline: 0;
+  }
+
+  :global(.cds--accordion__content > *:not(:last-child)) {
+    margin-block-end: $spacing-05;
+  }
+}
+
+.group {
+  :global(.cds--accordion__heading) {
+    padding-inline-end: 0;
+  }
+}
+
+.emptyMessage {
+  color: $text-secondary;
+  @include type-style("body-compact-01");
+}
+
+.checkbox {
+  :global(.cds--checkbox-label-text) {
+    @include type-style("body-compact-01");
+  }
+}
+
+.resetButton {
+  position: sticky;
+  bottom: 0;
+  flex-shrink: 0;
+  width: 100%;
+  max-width: none;
+  border-radius: 0;
+}

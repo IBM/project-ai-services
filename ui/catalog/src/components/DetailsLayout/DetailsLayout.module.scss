@@ -1,0 +1,66 @@
+@use "carbonTokens" as *;
+
+.breadcrumbDivider {
+  border: none;
+  border-bottom: 1px solid $border-subtle;
+  margin: 0;
+}
+
+.breadcrumbLabel {
+  display: flex;
+  align-items: center;
+  gap: $spacing-03;
+  cursor: pointer;
+}
+
+.headerSubtitle {
+  display: flex;
+  gap: $spacing-03;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: $spacing-03 0;
+}
+
+.mainGrid {
+  row-gap: 0;
+  padding-left: 0;
+  margin-left: 0;
+}
+
+.sidebarColumn {
+  position: sticky;
+  top: -32px;
+  height: calc(100vh - 200px);
+  padding: 0;
+  margin: 0;
+}
+
+.sideNav {
+  height: 100%;
+  width: 100%;
+  position: relative;
+
+  :global(.cds--side-nav__items) {
+    padding: 0;
+  }
+}
+
+.contentColumn {
+  padding-top: $spacing-05;
+  padding-bottom: $spacing-09;
+}
+
+@include breakpoint-down(md) {
+  .sidebarColumn {
+    position: relative;
+    height: auto;
+  }
+
+  .sideNav {
+    max-width: 100%;
+  }
+}
+
+:global(.cds--grid) {
+  margin-left: 0;
+}

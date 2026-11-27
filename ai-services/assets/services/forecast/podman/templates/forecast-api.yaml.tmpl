@@ -1,0 +1,119 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "forecast-api-{{ .InstanceSlug }}"
+  labels:
+    ai-services.io/template: "{{ .TemplateID }}"
+    ai-services.io/secret: "forecast-db-encryption-secret-{{ .InstanceSlug }}"
+    ai-services.io/secret-skip-cleanup: "true"
+    ai-services.io/volume: "forecast-cache-{{ .InstanceSlug }},forecast-db-encryption-secret-{{ .InstanceSlug }}"
+  annotations:
+    ai-services.io/routes: "8500:forecast-api-{{ .InstanceSlug }}:api"
+    # ai-services.io/ports: "{{ or .Values.forecast.port }}:8500"  # Uncomment to expose ports directly (bypasses Caddy)
+    io.podman.annotations.pids-limit/forecast-api: "4096"
+spec:
+  restartPolicy: always
+  volumes:
+    - name: cache
+      persistentVolumeClaim:
+        claimName: "forecast-cache-{{ .InstanceSlug }}"
+    - name: forecast-db-secret
+      secret:
+        secretName: "forecast-db-secret-{{ .InstanceSlug }}"
+    - name: forecast-db-encryption-secret
+      secret:
+        secretName: "forecast-db-encryption-secret-{{ .InstanceSlug }}"
+    - name: repository
+      persistentVolumeClaim:
+        claimName: "triton-repo-{{ .Values.ml_inference.instanceSlug }}"
+  initContainers:
+    - name: forecast-db-init
+      image: "{{ .Values.forecast.image }}"
+      command:
+        - "/bin/sh"
+        - "-c"
+      args:
+        - |
+          export POSTGRES_USER=$(cat /etc/secret/forecast-db-secret/username)
+          export POSTGRES_PASSWORD=$(cat /etc/secret/forecast-db-secret/password)
+          export WORKER_POSTGRES_USER=$(cat /etc/secret/forecast-db-secret/worker_username)
+          export WORKER_POSTGRES_PASSWORD=$(cat /etc/secret/forecast-db-secret/worker_password)
+          exec /var/venv/bin/python db/scripts/init_db.py
+      env:
+        - name: POSTGRES_HOST
+          value: "forecast-db-{{ .InstanceSlug }}"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.forecast.database }}"
+      volumeMounts:
+        - mountPath: /etc/secret/forecast-db-secret
+          name: forecast-db-secret
+          readOnly: true
+  containers:
+    - name: forecast-api
+      image: "{{ .Values.forecast.image }}"
+      command:
+        - "/bin/sh"
+        - "-c"
+      args:
+        - |
+          export POSTGRES_USER=$(cat /etc/secret/forecast-db-secret/username)
+          export POSTGRES_PASSWORD=$(cat /etc/secret/forecast-db-secret/password)
+          export WORKER_POSTGRES_USER=$(cat /etc/secret/forecast-db-secret/worker_username)
+          export WORKER_POSTGRES_PASSWORD=$(cat /etc/secret/forecast-db-secret/worker_password)
+          export DB_ENCRYPTION_KEY=$(cat /etc/secret/forecast-db-encryption-secret/db-encryption-key)
+          exec /var/venv/bin/python -m uvicorn app:app \
+            --host 0.0.0.0 \
+            --port 8500 \
+            --loop uvloop \
+            --http httptools
+      ports:
+        - containerPort: 8500
+          name: http
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8500
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8500
+        initialDelaySeconds: 10
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 3
+      env:
+        - name: POSTGRES_HOST
+          value: "forecast-db-{{ .InstanceSlug }}"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.forecast.database }}"
+        - name: DB_POOL_SIZE
+          value: "5"
+        - name: DB_MAX_OVERFLOW
+          value: "5"
+        - name: PORT
+          value: "8500"
+        - name: LOG_LEVEL
+          value: "{{ .Values.forecast.log_level }}"
+        - name: TRITON_URL
+          value: "http://{{ .Values.ml_inference.host }}:{{ .Values.ml_inference.port }}"
+        - name: MODEL_REPO_PATH
+          value: "/models"
+      volumeMounts:
+        - mountPath: /var/cache:z
+          name: cache
+        - mountPath: /models:z
+          name: repository
+        - mountPath: /etc/secret/forecast-db-secret
+          name: forecast-db-secret
+          readOnly: true
+        - mountPath: /etc/secret/forecast-db-encryption-secret
+          name: forecast-db-encryption-secret
+          readOnly: true

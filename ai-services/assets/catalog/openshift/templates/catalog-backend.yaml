@@ -21,7 +21,7 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
         ai-services.io/component: catalog-backend
     spec:
-      serviceAccountName: ai-services-catalog-sa
+      serviceAccountName: {{ .Release.Namespace }}-catalog-sa
       automountServiceAccountToken: true
       initContainers:
         - name: db-migration
@@ -81,6 +81,7 @@ spec:
             - --admin-username=admin
             - --admin-password-hash=$(ADMIN_PASSWORD)
             - --runtime={{ .Values.backend.runtime }}
+            - --namespace={{ .Release.Namespace }}
             - --workergateway-port={{ .Values.backend.workerGatewayPort }}
           env:
             - name: ADMIN_PASSWORD
@@ -119,6 +120,14 @@ spec:
               value: "{{ .Values.backend.workerGatewayPort }}"
             - name: LOCAL_WORKER
               value: "{{ .Values.backend.localWorker }}"
+            # LiteLLM runs in its own deployment; the catalog backend registers model routes through it.
+            - name: LITELLM_ENDPOINT
+              value: "http://litellm:{{ .Values.litellm.port }}"
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-secret
+                  key: master-key
           ports:
             - containerPort: 8080
               protocol: TCP

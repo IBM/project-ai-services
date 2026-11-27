@@ -1,0 +1,4 @@
+containers:
+  - name: "forecast-api-{{ .InstanceSlug }}-forecast-api"
+    format: ".Status"
+    alias: API_STATUS

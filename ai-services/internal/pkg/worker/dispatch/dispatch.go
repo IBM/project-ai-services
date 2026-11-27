@@ -378,16 +378,17 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 		}
 
 		route, err := pr.ManageProxyRoute(ctx, req.Op, payload.Route{
-			ID:                req.ID,
-			Domain:            req.Domain,
-			PathPrefix:        req.PathPrefix,
-			Upstream:          req.Upstream,
-			Terminal:          req.Terminal,
-			Type:              req.Type,
-			ClientCertPath:    req.ClientCertPath,
-			ClientKeyPath:     req.ClientKeyPath,
-			TrustedCACertPath: req.TrustedCACertPath,
-			ServerName:        req.ServerName,
+			ID:                     req.ID,
+			Domain:                 req.Domain,
+			PathPrefix:             req.PathPrefix,
+			Upstream:               req.Upstream,
+			Terminal:               req.Terminal,
+			Type:                   req.Type,
+			ClientCertPath:         req.ClientCertPath,
+			EncryptedClientKeyPath: req.EncryptedClientKeyPath,
+			SecretFilePath:         req.SecretFilePath,
+			TrustedCACertPath:      req.TrustedCACertPath,
+			ServerName:             req.ServerName,
 		})
 
 		return marshalOr(route, err)
@@ -495,19 +496,6 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 
 		return marshalOr(payload.HelmManifest{Manifest: manifest}, nil)
 
-	case workerpb.CommandType_COMMAND_TYPE_WAIT_INFERENCE_SERVICE:
-		var req payload.WaitInferenceService
-		if err := json.Unmarshal(p, &req); err != nil {
-			return nil, fmt.Errorf("wait_inference_service: decode payload: %w", err)
-		}
-
-		oc, ok := rt.(*openshiftRuntime.OpenshiftClient)
-		if !ok {
-			return nil, fmt.Errorf("wait_inference_service: runtime is not OpenShift")
-		}
-
-		return nil, oc.WithNamespace(req.Namespace).WaitForInferenceServiceReady(ctx, req.Name)
-
 	case workerpb.CommandType_COMMAND_TYPE_LIST_CRD:
 		var req payload.ListCRD
 		if err := json.Unmarshal(p, &req); err != nil {
@@ -528,6 +516,10 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 			filters["label"] = req.LabelKeys
 		}
 
+		if req.Name != "" {
+			filters["name"] = []string{req.Name}
+		}
+
 		resources, err := scoped.ListCRD(ctx, list, filters)
 		if err != nil {
 			return nil, err
@@ -535,7 +527,7 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 
 		wireItems := make([]payload.CRDResource, len(resources))
 		for i, r := range resources {
-			wireItems[i] = payload.CRDResource{Name: r.Name, Labels: r.Labels}
+			wireItems[i] = payload.CRDResource{Name: r.Name, Labels: r.Labels, Ready: r.Ready}
 		}
 
 		return marshalOr(wireItems, nil)

@@ -1,73 +1,9 @@
 @use "carbonTokens" as *;
 
-.breadcrumbDivider {
-  border: none;
-  border-bottom: 1px solid $border-subtle;
-  margin: 0;
-}
-
-.breadcrumbLabel {
-  display: flex;
-  align-items: center;
-  gap: $spacing-03;
-  cursor: pointer;
-}
-
 .resourceSkeletonBar {
   width: 100%;
   height: $spacing-03;
   margin-top: $spacing-05;
-}
-
-.mainGrid {
-  row-gap: 0;
-  padding-left: 0 !important;
-  margin-left: 0 !important;
-}
-
-.sidebarColumn {
-  position: sticky;
-  top: -32px;
-  height: calc(100vh - 200px);
-  padding: 0 !important;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-  margin: 0 !important;
-  margin-left: 0 !important;
-}
-
-.sideNav {
-  height: 100%;
-  width: 100%;
-  position: relative;
-  padding: 0 !important;
-  margin: 0 !important;
-  margin-left: 0 !important;
-
-  :global(.cds--side-nav__items) {
-    // padding-left: 0 !important;
-    padding: 0;
-    margin-left: 0 !important;
-  }
-
-  :global(.cds--side-nav) {
-    padding-left: 0 !important;
-    margin-left: 0 !important;
-  }
-
-  :global(.cds--side-nav__navigation) {
-    padding-left: 0 !important;
-    margin-left: 0 !important;
-  }
-
-  @media (max-width: 671px) {
-    position: relative;
-  }
-}
-
-.contentColumn {
-  padding-top: $spacing-05;
-  padding-bottom: $spacing-09;
 }
 
 .detailsGrid {
@@ -84,14 +20,6 @@
   font-size: var(--cds-heading-03-font-size);
   font-weight: var(--cds-heading-03-font-weight);
   line-height: var(--cds-heading-03-line-height);
-}
-
-.headerSubtitle {
-  display: flex;
-  gap: $spacing-03;
-  align-items: center;
-  flex-wrap: wrap;
-  padding: $spacing-03 0;
 }
 
 .headerCertifiedBadge {
@@ -237,6 +165,12 @@
   }
 }
 
+.integrationEndpointCopyValue {
+  display: flex;
+  align-items: center;
+  gap: $spacing-03;
+}
+
 .serviceDetails {
   display: flex;
   flex-direction: column;
@@ -265,19 +199,6 @@
   flex: 1;
 }
 
-// Responsive adjustments
-@media (max-width: 671px) {
-  .sidebarColumn {
-    position: relative;
-    height: auto;
-  }
-
-  .sideNav {
-    position: relative;
-    max-width: 100%;
-  }
-}
-
 .progressSuccess :global(.cds--progress-bar__bar) {
   background-color: var(--cds-support-success) !important;
 }
@@ -294,31 +215,6 @@
 .progressWarning :global(.cds--progress-bar__track),
 .progressDanger :global(.cds--progress-bar__track) {
   background-color: #c6c6c6;
-}
-
-// Status tag styling to match CellRenderers
-.statusTagError {
-  :global(svg) {
-    fill: $support-error;
-  }
-}
-
-.statusTagSuccess {
-  :global(svg) {
-    fill: $support-success;
-  }
-}
-
-.statusTagInfo {
-  :global(svg) {
-    fill: $support-info;
-  }
-}
-
-.statusTagSecondary {
-  :global(svg) {
-    fill: $text-secondary;
-  }
 }
 
 .workerInfoRow {
@@ -380,8 +276,4 @@
 .acceleratorCardItem {
   padding: $spacing-02 0;
   color: $text-primary;
-}
-
-:global(.cds--grid) {
-  margin-left: 0;
 }

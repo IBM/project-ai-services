@@ -60,6 +60,11 @@ export const WORKERS_ENDPOINTS = {
   DEREGISTER_WORKER: (id: string) => `/workers/${id}`,
 };
 
-export const MODEL_ENDPOINTS = {
+export const MODEL_MANAGEMENT_ENDPOINTS = {
+  GET_CATALOG_MODELS: "/catalog/models",
+  GET_CATALOG_MODEL_DETAILS: (id: string) =>
+    `/catalog/models/${encodeURIComponent(id)}`,
   LIST_MODELS: "/models",
+  GET_MODEL: (id: string) => `/models/${id}`,
+  GENERATE_MODEL_KEY: (id: string) => `/models/${id}/keys`,
 };

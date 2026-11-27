@@ -4,7 +4,8 @@ Unit tests for the connector database helpers in forecast.db.connectors.
 Tests cover:
  - _name_filter: LIKE wildcards and escape characters are properly formatted
  - lock_connectors: timeout and table lock are executed
- - connector_exists & count_queued_jobs: scalar count queries
+ - connector_exists & connector_id_exists: scalar queries
+ - insert_failed_connector: a FAILED connector without training details or job
  - insert_connector: ORM models are instantiated with correct fields and added to session
  - get_connector: with and without for_update row locking
  - list_connectors: pagination, count, and name filtering
@@ -46,13 +47,56 @@ def test_connector_exists_returns_boolean():
 
 
 @pytest.mark.unit
-def test_count_queued_jobs_returns_count():
+def test_connector_exists_counts_a_failed_connector_too():
     session = MagicMock(name="session")
-    session.scalar.return_value = 3
-    assert connectors_db.count_queued_jobs(session) == 3
+    session.scalar.return_value = True
 
-    session.scalar.return_value = None
-    assert connectors_db.count_queued_jobs(session) == 0
+    assert connectors_db.connector_exists(session) is True
+
+    stmt_str = str(session.scalar.call_args[0][0].compile(compile_kwargs={"literal_binds": True}))
+    assert "status" not in stmt_str
+    assert "WHERE" not in stmt_str
+
+
+@pytest.mark.unit
+def test_connector_id_exists_filters_on_the_id_whatever_the_status():
+    session = MagicMock(name="session")
+    session.scalar.return_value = True
+
+    assert connectors_db.connector_id_exists(session, CONN_ID) is True
+
+    statement = session.scalar.call_args[0][0]
+    stmt_str = str(statement.compile(compile_kwargs={"literal_binds": True}))
+    assert CONN_ID.replace("-", "") in stmt_str.replace("-", "")
+    assert "status" not in stmt_str
+
+    session.scalar.return_value = False
+    assert connectors_db.connector_id_exists(session, CONN_ID) is False
+
+
+@pytest.mark.unit
+def test_insert_failed_connector_stores_only_the_connector():
+    session = MagicMock(name="session")
+
+    connectors_db.insert_failed_connector(
+        session,
+        connector_id=CONN_ID,
+        name="test-conn",
+        connector_type="db2_for_i",
+        config={"host": "localhost", "password": "enc"},
+        message="A connector already exists. Only one connector is supported.",
+    )
+
+    session.add.assert_called_once()
+    session.add_all.assert_not_called()
+    connector = session.add.call_args[0][0]
+    assert isinstance(connector, Connector)
+    assert connector.id == uuid.UUID(CONN_ID)
+    assert connector.name == "test-conn"
+    assert connector.connection_details == {"host": "localhost", "password": "enc"}
+    assert connector.status == "FAILED"
+    assert connector.message == "A connector already exists. Only one connector is supported."
+    session.flush.assert_called_once()
 
 
 @pytest.mark.unit
@@ -69,7 +113,7 @@ def test_insert_connector_adds_orm_models_to_session():
         config={"host": "localhost", "password": "enc"},
         source_table="ORDERS",
         target_column="LATE",
-        input_columns=[{"name": "COL1", "type": "string"}],
+        input_columns=["COL1"],
         schedule="daily",
     )
 
@@ -89,7 +133,7 @@ def test_insert_connector_adds_orm_models_to_session():
     assert training_config.connector_id == conn_uuid
     assert training_config.source_table == "ORDERS"
     assert training_config.target_column == "LATE"
-    assert training_config.input_columns == [{"name": "COL1", "type": "string"}]
+    assert training_config.input_columns == ["COL1"]
     assert training_config.schedule == "daily"
 
     assert isinstance(job, Job)
@@ -246,3 +290,86 @@ def test_list_jobs_queries_jobs():
     session.execute.assert_called_once()
     stmt_str = str(session.execute.call_args[0][0])
     assert "jobs" in stmt_str
+
+
+CONN_ID = "11111111-1111-1111-1111-111111111111"
+CONNECTOR_FIELDS = {
+    "id": uuid.UUID(CONN_ID), "name": "prod", "type": "db2_for_i", "config": {"host": "h"},
+    "status": "ACCEPTED", "message": None, "created_at": NOW, "updated_at": NOW,
+    "last_trained_at": None, "source_table": "ORDERS", "target_column": "LATE",
+    "schedule": "daily", "input_columns": ["REGION"],
+}
+FORECASTER_FIELDS = {"version": 3, "metrics": {"metric": "accuracy"}, "created_at": NOW}
+
+
+@pytest.mark.unit
+def test_get_default_connector_returns_the_oldest_with_its_input_columns():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.first.return_value = CONNECTOR_FIELDS
+
+    result = connectors_db.get_default_connector(session)
+
+    assert isinstance(result, connectors_db.ConnectorRow)
+    assert result.input_columns == ["REGION"]
+    stmt_str = str(session.execute.call_args[0][0])
+    assert "ORDER BY connectors.attached_at ASC" in stmt_str
+    assert "LIMIT" in stmt_str
+    assert "WHERE" not in stmt_str  # A FAILED connector is the default one too.
+
+
+@pytest.mark.unit
+def test_get_default_connector_without_a_connector_returns_none():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.first.return_value = None
+
+    assert connectors_db.get_default_connector(session) is None
+
+
+@pytest.mark.unit
+def test_list_forecasters_returns_rows_newest_first():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.all.return_value = [FORECASTER_FIELDS]
+
+    rows = connectors_db.list_forecasters(session, CONN_ID)
+
+    assert rows == [connectors_db.ForecasterRow(**FORECASTER_FIELDS)]
+    assert "ORDER BY forecasters.version DESC" in str(session.execute.call_args[0][0])
+
+
+@pytest.mark.unit
+def test_get_forecaster_filters_on_the_version():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.first.return_value = FORECASTER_FIELDS
+
+    row = connectors_db.get_forecaster(session, CONN_ID, 3)
+
+    assert row.version == 3
+    assert "forecasters.version =" in str(session.execute.call_args[0][0])
+
+
+@pytest.mark.unit
+def test_get_forecaster_unknown_version_returns_none():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.first.return_value = None
+
+    assert connectors_db.get_forecaster(session, CONN_ID, 9) is None
+
+
+@pytest.mark.unit
+def test_get_newest_forecaster_takes_the_highest_version():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.first.return_value = FORECASTER_FIELDS
+
+    row = connectors_db.get_newest_forecaster(session, CONN_ID)
+
+    assert row.metrics == {"metric": "accuracy"}
+    stmt_str = str(session.execute.call_args[0][0])
+    assert "ORDER BY forecasters.version DESC" in stmt_str and "LIMIT" in stmt_str
+
+
+@pytest.mark.unit
+def test_get_newest_forecaster_without_one_returns_none():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.first.return_value = None
+
+    assert connectors_db.get_newest_forecaster(session, CONN_ID) is None

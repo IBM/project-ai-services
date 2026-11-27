@@ -118,12 +118,6 @@ enum CommandType {
   // the raw multi-document YAML manifest stored by Helm.
   COMMAND_TYPE_HELM_GET_MANIFEST         = 32;
 
-  // Wait for a KServe InferenceService to reach Ready=True on an OpenShift worker.
-  // The control plane sends the InferenceService name and namespace; the worker
-  // polls the InferenceService status and returns when it is ready or the
-  // context deadline is exceeded.
-  COMMAND_TYPE_WAIT_INFERENCE_SERVICE    = 33;
-
   // List CRD resources on an OpenShift worker.
   // The control plane sends the GVK, namespace, and label filters; the worker
   // queries the cluster and returns the matching resource names and labels.

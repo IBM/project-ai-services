@@ -73,4 +73,6 @@ type PodResources struct {
 type CRDResource struct {
 	Name   string
 	Labels map[string]string
+	// Ready is true when the resource's status.conditions has a Ready condition with status True.
+	Ready bool
 }

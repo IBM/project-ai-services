@@ -20,7 +20,7 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
         ai-services.io/component: worker
     spec:
-      serviceAccountName: ai-services-sa
+      serviceAccountName: {{ .Release.Namespace }}-sa
       automountServiceAccountToken: true
       {{- if .Values.hostAliases }}
       hostAliases:
@@ -42,6 +42,7 @@ spec:
             - "{{ .Values.worker.gatewayAddr }}"
             - --token={{ .Values.worker.token }}
             - --runtime={{ .Values.worker.runtime }}
+            - --namespace={{ .Release.Namespace }}
           env:
             - name: AI_SERVICES_LOG_LEVEL
               value: "info"

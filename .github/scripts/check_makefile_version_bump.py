@@ -22,12 +22,14 @@ COMPONENTS = [
     ("services/summarize", "summarize-service"),
     ("services/extract", "extract-service"),
     ("services/translate", "translate-service"),
+    ("services/forecast", "forecast-service"),
     # Images
     ("images/service-base", "service-base"),
     ("images/postgres", "postgres"),
     ("images/caddy", "caddy"),
     ("images/litellm", "litellm"),
     ("images/tools", "tools"),
+    ("images/vllm-rocm", "vllm-rocm"),
     # UI Images
     ("ui/chatbot", "chatbot-ui"),
     ("ui/digitize", "digitize-ui"),

@@ -25,6 +25,8 @@ jobs:
            image: postgres
          - path: images/service-base
            image: service-base
+         - path: images/vllm-rocm
+           image: vllm-rocm
          - path: images/tools
            image: tools
          - path: ui/catalog

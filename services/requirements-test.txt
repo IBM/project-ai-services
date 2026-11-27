@@ -27,7 +27,7 @@ lingua-language-detector==2.2.0
 # Common dependencies with specific versions for test compatibility
 tqdm==4.67.3
 opensearch-py==3.1.0
-cohere==7.0.3
+cohere==7.3.2
 numpy==2.4.4
 psutil==7.2.2
 
@@ -45,6 +45,24 @@ paramiko==5.0.0
 
 # Connector secret encryption (required by forecast)
 cryptography>=42.0.0
+
+# Db2 for i data loader (required by forecast)
+mapepire-python==2.0.0
+pyarrow>=14.0.0
+
+# Training worker (required by forecast). Keep in step with forecast/requirements.txt, except for
+# CatBoost: the ppc64le wheels (1.2.6 and 1.2.7) need numpy<2.0, and this file pins numpy 2.x for
+# digitize, so CatBoost cannot be installed here. The tests that need it skip themselves, and the
+# service image (which has no numpy pin) installs it.
+pandas>=2.0.0
+scipy>=1.11.0
+scikit-learn>=1.3.0
+lightgbm>=4.0.0
+autogluon.tabular[lightgbm]>=1.1.0
+onnx>=1.16.0
+onnxmltools>=1.12.0
+onnxruntime>=1.18.0
+protobuf>=4.25.0
 
 # Document processing (required by digitize)
 pypdfium2==5.9.0

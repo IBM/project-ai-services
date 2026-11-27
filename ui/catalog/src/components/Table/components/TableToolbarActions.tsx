@@ -45,6 +45,13 @@ interface TableToolbarActionsProps {
    */
   filterLabel?: string;
   /**
+   * When provided, a filter icon button is rendered that calls this handler
+   * (e.g. to toggle a side filter panel) instead of the filterSlot flyout.
+   */
+  onFilterToggle?: () => void;
+  /** Whether the side filter panel controlled by onFilterToggle is open. */
+  isFilterOpen?: boolean;
+  /**
    * Additional toolbar buttons rendered after the column-visibility menu.
    */
   children?: ReactNode;
@@ -88,6 +95,8 @@ const TableToolbarActions = ({
   onResetColumns,
   filterSlot,
   filterLabel = "Filter",
+  onFilterToggle,
+  isFilterOpen,
   children,
 }: TableToolbarActionsProps) => {
   const toggleableHeaders = getToggleableHeaders(headers);
@@ -115,7 +124,20 @@ const TableToolbarActions = ({
           onClick={onRefresh}
         />
 
-        {filterSlot && (
+        {onFilterToggle && (
+          <Button
+            hasIconOnly
+            kind="ghost"
+            renderIcon={Filter}
+            iconDescription={filterLabel}
+            aria-expanded={isFilterOpen}
+            isSelected={isFilterOpen}
+            size="lg"
+            onClick={onFilterToggle}
+          />
+        )}
+
+        {!onFilterToggle && filterSlot && (
           <OverflowMenu
             renderIcon={Filter}
             iconDescription={filterLabel}

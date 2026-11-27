@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "triton"
+  labels:
+    ai-services.io/service: {{ .Release.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: triton
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      ai-services.io/service: {{ .Release.Name }}
+      ai-services.io/component: triton
+  template:
+    metadata:
+      labels:
+        ai-services.io/service: {{ .Release.Name }}
+        ai-services.io/template: {{ .Values.templateID }}
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+        ai-services.io/component: triton
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: triton
+          image: "{{ .Values.image }}"
+          args:
+            - tritonserver
+            - --model-repository=/models
+            - --model-control-mode=explicit
+            - --strict-readiness=false
+            - --exit-on-error=false
+            - --http-port=8000
+            - --metrics-port=8002
+          ports:
+            - name: http
+              containerPort: 8000
+            - name: metrics
+              containerPort: 8002
+          livenessProbe:
+            httpGet:
+              path: /v2/health/live
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /v2/health/ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu | quote }}
+              memory: {{ .Values.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu | quote }}
+              memory: {{ .Values.resources.limits.memory | quote }}
+          volumeMounts:
+            - mountPath: /models
+              name: repository
+              readOnly: true
+      volumes:
+        - name: repository
+          persistentVolumeClaim:
+            claimName: triton-repository

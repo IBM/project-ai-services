@@ -6,8 +6,10 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +28,16 @@ const (
 	defaultDirPermission  = 0o755
 	bytesPerKB            = 1024
 	bytesPerMB            = bytesPerKB * 1024
+
+	// DigitizeContentDir is the archive directory (under cache/) holding digitized output files.
+	DigitizeContentDir = "digitized"
+
+	operationDigitization = "digitization"
+	statusCompleted       = "completed"
 )
+
+// ErrContentNotFound is returned when the digitize service has no content file for a document.
+var ErrContentNotFound = errors.New("digitized content not found")
 
 // DigitizeExportResponse represents the response from the digitize export API.
 type DigitizeExportResponse struct {
@@ -50,6 +61,17 @@ type DigitizeExportSummary struct {
 	Jobs              DigitizeExportEntitySummary `json:"jobs"`
 	Documents         DigitizeExportEntitySummary `json:"documents"`
 	DocumentChecksums DigitizeExportEntitySummary `json:"document_checksums"`
+}
+
+// DigitizeContentResponse is the response of GET /v1/documents/{id}/content.
+type DigitizeContentResponse struct {
+	Result       json.RawMessage `json:"result"`
+	OutputFormat string          `json:"output_format"`
+}
+
+// ContentFetcher retrieves the digitized content of a document.
+type ContentFetcher interface {
+	FetchDocumentContent(ctx context.Context, docID string) (*DigitizeContentResponse, error)
 }
 
 // DigitizeExportEntitySummary contains summary for a specific entity type.
@@ -101,7 +123,8 @@ func NewDigitizeBackupClient(serviceURL string) *DigitizeBackupClient {
 	}
 }
 
-// CallExportAPI calls the digitize Export API.
+// CallExportAPI calls the digitize Export API, which returns the jobs, documents and
+// checksums of both ingestion and digitization.
 func (c *DigitizeBackupClient) CallExportAPI(ctx context.Context) (*DigitizeExportResponse, error) {
 	logger.Infoln("Calling digitize Export API...")
 
@@ -113,7 +136,6 @@ func (c *DigitizeBackupClient) CallExportAPI(ctx context.Context) (*DigitizeExpo
 		SetQueryParam("limit", ExportAllRecordsLimit).
 		SetResult(&exportResponse).
 		Get("/v1/export")
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to call export API: %w", err)
 	}
@@ -125,8 +147,54 @@ func (c *DigitizeBackupClient) CallExportAPI(ctx context.Context) (*DigitizeExpo
 	return &exportResponse, nil
 }
 
+// FetchDocumentContent downloads the digitized content of a document.
+func (c *DigitizeBackupClient) FetchDocumentContent(ctx context.Context, docID string) (*DigitizeContentResponse, error) {
+	var content DigitizeContentResponse
+
+	resp, err := c.client.R().
+		SetContext(ctx).
+		SetPathParam("doc_id", docID).
+		SetResult(&content).
+		Get("/v1/documents/{doc_id}/content")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch content for document %s: %w", docID, err)
+	}
+
+	if resp.StatusCode() == http.StatusNotFound {
+		return nil, ErrContentNotFound
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("content API for document %s returned HTTP %d: %s", docID, resp.StatusCode(), resp.String())
+	}
+
+	return &content, nil
+}
+
+// BackupDigitize exports digitize metadata and writes it to backupFile.
+//
+// The ingestion and digitization jobs, documents and checksums are backed up,
+// together with the digitized output files (json/md/txt) of every completed
+// digitization document.
+func BackupDigitize(ctx context.Context, digitizeURL, backupFile string) (*DigitizeExportResponse, error) {
+	client := NewDigitizeBackupClient(digitizeURL)
+
+	exportResponse, err := client.CallExportAPI(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := CreateDigitizeBackupArchive(ctx, backupFile, exportResponse, client); err != nil {
+		return nil, err
+	}
+
+	return exportResponse, nil
+}
+
 // CreateDigitizeBackupArchive creates a backup archive from the export response.
-func CreateDigitizeBackupArchive(backupFile string, exportResponse *DigitizeExportResponse) error {
+// When fetcher is non-nil, the digitized content of every completed digitization
+// document is downloaded and stored under cache/digitized.
+func CreateDigitizeBackupArchive(ctx context.Context, backupFile string, exportResponse *DigitizeExportResponse, fetcher ContentFetcher) error {
 	logger.Infoln("Creating digitize backup archive...")
 
 	tempDir, err := os.MkdirTemp("", "digitize-backup-*")
@@ -166,7 +234,13 @@ func CreateDigitizeBackupArchive(backupFile string, exportResponse *DigitizeExpo
 		}
 	}
 
-	if err := writeDigitizeBackupInfo(backupDir); err != nil {
+	if fetcher != nil {
+		if err := writeDigitizedContentFiles(ctx, filepath.Join(cacheDir, DigitizeContentDir), fetcher, exportResponse.Data.Documents); err != nil {
+			return err
+		}
+	}
+
+	if err := writeDigitizeBackupInfo(backupDir, fetcher != nil); err != nil {
 		return err
 	}
 
@@ -197,10 +271,87 @@ func writeDigitizeFiles(dir, idKey, suffix, kind string, records []map[string]in
 	return nil
 }
 
-func writeDigitizeBackupInfo(tempDir string) error {
+// writeDigitizedContentFiles downloads the content of every completed digitization
+// document into contentDir, one file per document, writing each to disk before fetching the next.
+func writeDigitizedContentFiles(ctx context.Context, contentDir string, fetcher ContentFetcher, documents []map[string]interface{}) error {
+	var written, missing int
+
+	for _, document := range documents {
+		if !isCompletedDigitizationDocument(document) {
+			continue
+		}
+
+		docID, _ := document["id"].(string)
+		if docID == "" || docID != filepath.Base(docID) {
+			return fmt.Errorf("export response contains document with invalid id %q", docID)
+		}
+
+		content, err := fetcher.FetchDocumentContent(ctx, docID)
+		if errors.Is(err, ErrContentNotFound) {
+			logger.Warningf("Digitized content for document %s not found, skipping\n", docID)
+
+			missing++
+
+			continue
+		}
+
+		if err != nil {
+			return err
+		}
+
+		if err := writeDigitizedContentFile(contentDir, docID, content); err != nil {
+			return err
+		}
+
+		written++
+	}
+
+	logger.Infof("Digitized content - backed up: %d, missing: %d\n", written, missing)
+
+	return nil
+}
+
+func isCompletedDigitizationDocument(document map[string]interface{}) bool {
+	docType, _ := document["type"].(string)
+	status, _ := document["status"].(string)
+
+	return docType == operationDigitization && status == statusCompleted
+}
+
+func writeDigitizedContentFile(contentDir, docID string, content *DigitizeContentResponse) error {
+	var data []byte
+
+	switch content.OutputFormat {
+	case "json":
+		data = content.Result
+	case "md", "txt":
+		var text string
+		if err := json.Unmarshal(content.Result, &text); err != nil {
+			return fmt.Errorf("content of document %s is not text: %w", docID, err)
+		}
+
+		data = []byte(text)
+	default:
+		return fmt.Errorf("document %s has unsupported output format %q", docID, content.OutputFormat)
+	}
+
+	if err := os.MkdirAll(contentDir, defaultDirPermission); err != nil {
+		return fmt.Errorf("failed to create digitized content directory: %w", err)
+	}
+
+	filePath := filepath.Join(contentDir, fmt.Sprintf("%s.%s", docID, content.OutputFormat))
+	if err := os.WriteFile(filePath, data, defaultFilePermission); err != nil {
+		return fmt.Errorf("failed to write content file for %s: %w", docID, err)
+	}
+
+	return nil
+}
+
+func writeDigitizeBackupInfo(tempDir string, includesDigitizedContent bool) error {
 	backupInfo := map[string]interface{}{
-		"backup_date": time.Now().Format(time.RFC3339),
-		"type":        "digitize",
+		"backup_date":                time.Now().Format(time.RFC3339),
+		"type":                       "digitize",
+		"includes_digitized_content": includesDigitizedContent,
 	}
 
 	return writeJSONFile(filepath.Join(tempDir, "backup_info.json"), backupInfo)
@@ -348,5 +499,3 @@ func GetBackupFile(backupFile string, appName string) (string, error) {
 
 	return absBackupFile, nil
 }
-
-// Made with Bob

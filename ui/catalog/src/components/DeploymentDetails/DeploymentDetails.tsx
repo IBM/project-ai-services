@@ -3,27 +3,17 @@ import { useDeploymentDatasourceSupport } from "./hooks/useDeploymentDatasourceS
 import {
   Grid,
   Column,
-  SideNav,
-  SideNavItems,
-  SideNavLink,
   Tag,
   ProgressBar,
   SkeletonText,
   SkeletonPlaceholder,
   ToastNotification,
+  CopyButton,
 } from "@carbon/react";
 import ApplicationDatasourcesTable from "./components/ApplicationDatasourcesTable";
-import { InlineEditableTitle } from "@/components";
-import { PageHeader, ProductiveCard } from "@carbon/ibm-products";
-import {
-  ArrowLeft,
-  Badge,
-  CheckmarkFilled,
-  PauseOutline,
-  ErrorFilled,
-  InProgress,
-  DiamondFill,
-} from "@carbon/icons-react";
+import { InlineEditableTitle, DetailsLayout, StatusTag } from "@/components";
+import { ProductiveCard } from "@carbon/ibm-products";
+import { Badge, DiamondFill } from "@carbon/icons-react";
 import type {
   DeploymentDetails as DeploymentDetailsType,
   DeploymentServiceData,
@@ -42,6 +32,7 @@ import {
   SERVICE_ENDPOINTS,
   COMPONENT_TYPES,
   WORKER_RUNTIME_LABELS,
+  PAGE_TITLES,
 } from "@/constants";
 
 interface DeploymentDetailsProps {
@@ -79,11 +70,15 @@ const DeploymentDetails = ({
   const [integrationFetchError, setIntegrationFetchError] = useState<
     string | null
   >(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const [acceleratorCards, setAcceleratorCards] = useState<
     AcceleratorCardType[]
   >([]);
   const [certifiedBy, setCertifiedBy] = useState<string | null>(null);
   const [workerInfo, setWorkerInfo] = useState<ApplicationWorker | null>(null);
+  const [testAssistantUrl, setTestAssistantUrl] = useState<string | null>(null);
+  const isDigitalAssistant =
+    deploymentSource === PAGE_TITLES.DIGITAL_ASSISTANTS;
 
   useEffect(() => {
     const fetchResources = async () => {
@@ -296,6 +291,11 @@ const DeploymentDetails = ({
             };
           });
 
+        const chatUiEndpoint = deploymentServices
+          .find((s) => s.catalog_id === "chat")
+          ?.endpoints?.find((e) => e.type === "ui");
+        setTestAssistantUrl(chatUiEndpoint?.url || null);
+
         setServiceData(transformedServices);
         setIntegrationEndpoints(transformedEndpoints);
         setCertifiedBy(isDeploymentCertified ? "IBM" : null);
@@ -304,6 +304,7 @@ const DeploymentDetails = ({
         console.error("Error fetching service details:", error);
         setServiceData([]);
         setIntegrationEndpoints([]);
+        setTestAssistantUrl(null);
         setIntegrationFetchError(
           "Could not retrieve integration endpoints. Please try again.",
         );
@@ -314,77 +315,6 @@ const DeploymentDetails = ({
 
     fetchServiceDetails();
   }, [deployment.id, deployment.type]);
-
-  const STATUS_CONFIG = {
-    Initializing: {
-      tagType: "blue" as const,
-      icon: InProgress,
-      className: styles.statusTagInfo,
-    },
-    Downloading: {
-      tagType: "blue" as const,
-      icon: InProgress,
-      className: styles.statusTagInfo,
-    },
-    Deploying: {
-      tagType: "blue" as const,
-      icon: InProgress,
-      className: styles.statusTagInfo,
-    },
-    Running: {
-      tagType: "green" as const,
-      icon: CheckmarkFilled,
-      className: styles.statusTagSuccess,
-    },
-    Deleting: {
-      tagType: "blue" as const,
-      icon: InProgress,
-      className: styles.statusTagInfo,
-    },
-    Error: {
-      tagType: "red" as const,
-      icon: ErrorFilled,
-      className: styles.statusTagError,
-    },
-    Stopped: {
-      tagType: "gray" as const,
-      icon: PauseOutline,
-      className: styles.statusTagSecondary,
-    },
-    "Deploying...": {
-      tagType: "blue" as const,
-      icon: InProgress,
-      className: styles.statusTagInfo,
-    },
-    "Deleting...": {
-      tagType: "blue" as const,
-      icon: InProgress,
-      className: styles.statusTagInfo,
-    },
-  } as const;
-
-  const DEFAULT_STATUS_CONFIG = {
-    tagType: "gray" as const,
-    icon: PauseOutline,
-    className: styles.statusTagSecondary,
-  } as const;
-
-  const getStatusTag = (status: string) => {
-    const config =
-      STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ||
-      DEFAULT_STATUS_CONFIG;
-
-    return (
-      <Tag
-        type={config.tagType}
-        size="md"
-        renderIcon={config.icon}
-        className={config.className}
-      >
-        {status}
-      </Tag>
-    );
-  };
 
   const calculatePercentage = (used: number, allocated: number) => {
     if (allocated === 0) return 0;
@@ -399,8 +329,28 @@ const DeploymentDetails = ({
     onNameUpdate?.(newName);
   };
 
+  // navigator.clipboard is undefined on non-secure (plain HTTP) pages. Hide the copy button there, since CopyButton would still report "Copied to clipboard".
+  const canCopyToClipboard = Boolean(navigator.clipboard);
+  const handleCopyMcpEndpoint = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyError(null);
+    } catch {
+      setCopyError("Could not copy the MCP endpoint. Please copy it manually.");
+    }
+  };
+
   return (
     <>
+      {copyError && (
+        <ToastNotification
+          kind="error"
+          title="Failed to copy MCP endpoint"
+          subtitle={copyError}
+          onClose={() => setCopyError(null)}
+          className={styles.toastNotification}
+        />
+      )}
       {datasourceSupportError && (
         <ToastNotification
           kind="error"
@@ -411,495 +361,450 @@ const DeploymentDetails = ({
           className={styles.toastNotification}
         />
       )}
-      <div>
-        <PageHeader
-          breadcrumbs={[
-            {
-              key: "back",
-              href: "#",
-              title: deploymentSource,
-              label: (
-                <span
-                  className={styles.breadcrumbLabel}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    onBack();
-                  }}
-                >
-                  <ArrowLeft size={16} />
-                  {deploymentSource}
+      <DetailsLayout
+        backLabel={deploymentSource}
+        onBack={onBack}
+        title={
+          <InlineEditableTitle
+            id="deployment-name-inline"
+            label="Deployment name"
+            value={deployment.name}
+            onSave={handleNameSave}
+          />
+        }
+        titleAsText={deployment.name}
+        subtitle={
+          <>
+            {activeSection === "datasources" && datasourceCount === 0 ? (
+              <Tag type="purple" size="md" renderIcon={DiamondFill}>
+                No data
+              </Tag>
+            ) : (
+              <StatusTag status={deployment.status} />
+            )}
+            <Tag type="gray">{deployment.type}</Tag>
+            {certifiedBy && (
+              <span className={styles.headerCertifiedBadge}>
+                <Badge size={16} className={styles.badgeIcon} />
+                <span className={styles.badgeName}>
+                  {certifiedBy} certified
                 </span>
-              ),
-            },
-          ]}
-          breadcrumbOverflowAriaLabel="Show more breadcrumbs"
-          title={{
-            content: (
-              <InlineEditableTitle
-                id="deployment-name-inline"
-                label="Deployment name"
-                value={deployment.name}
-                onSave={handleNameSave}
-              />
-            ),
-            asText: deployment.name,
-            breadcrumbContent: deployment.name,
-          }}
-          subtitle={
-            <div className={styles.headerSubtitle}>
-              {activeSection === "datasources" && datasourceCount === 0 ? (
-                <Tag type="purple" size="md" renderIcon={DiamondFill}>
-                  No data
-                </Tag>
-              ) : (
-                getStatusTag(deployment.status)
-              )}
-              <Tag type="gray">{deployment.type}</Tag>
-              {certifiedBy && (
-                <span className={styles.headerCertifiedBadge}>
-                  <Badge size={16} className={styles.badgeIcon} />
-                  <span className={styles.badgeName}>
-                    {certifiedBy} certified
-                  </span>
-                </span>
-              )}
-            </div>
-          }
-        />
-        <hr className={styles.breadcrumbDivider} />
-      </div>
-
-      <Grid className={styles.mainGrid}>
-        <Column sm={4} md={2} lg={3} className={styles.sidebarColumn}>
-          <SideNav
-            isFixedNav
-            expanded
-            aria-label="Side navigation"
-            className={styles.sideNav}
-          >
-            <SideNavItems>
-              <SideNavLink
-                isActive={activeSection === "details"}
-                onClick={() => setActiveSection("details")}
-              >
-                Details
-              </SideNavLink>
-              <SideNavLink
-                isActive={activeSection === "services"}
-                onClick={() => setActiveSection("services")}
-              >
-                Services
-              </SideNavLink>
-              <SideNavLink
-                isActive={activeSection === "integration"}
-                onClick={() => setActiveSection("integration")}
-              >
-                Integration endpoints
-              </SideNavLink>
-              {acceptsDatasource && (
-                <SideNavLink
-                  isActive={activeSection === "datasources"}
-                  onClick={() => setActiveSection("datasources")}
-                >
-                  Data sources
-                </SideNavLink>
-              )}
-            </SideNavItems>
-          </SideNav>
-        </Column>
-
-        <Column sm={4} md={6} lg={13} className={styles.contentColumn}>
-          {activeSection === "details" && (
-            <>
-              <Grid className={styles.detailsGrid}>
-                <Column sm={4} md={8} lg={16}>
-                  <ProductiveCard
-                    title="Details"
-                    className={styles.detailsCard}
-                  >
-                    {(workerInfo?.name || workerInfo?.runtime_type) && (
-                      <div className={styles.workerInfoRow}>
-                        {workerInfo.name && (
-                          <div className={styles.workerInfoField}>
-                            <span className={styles.workerInfoLabel}>
-                              Worker resource
-                            </span>
-                            <span className={styles.workerInfoValue}>
-                              {workerInfo.name}
-                            </span>
-                          </div>
-                        )}
-                        {workerInfo.runtime_type && (
-                          <div className={styles.workerInfoField}>
-                            <span className={styles.workerInfoLabel}>
-                              Deployment type
-                            </span>
-                            <span className={styles.workerInfoValue}>
-                              {WORKER_RUNTIME_LABELS[
-                                workerInfo.runtime_type.toLowerCase()
-                              ]?.label ?? workerInfo.runtime_type}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </ProductiveCard>
-                </Column>
-              </Grid>
-
-              <Grid className={styles.resourcesGrid}>
-                <Column sm={4} md={8} lg={16}>
-                  <ProductiveCard
-                    title="Allocated resources"
-                    className={styles.resourceCard}
-                  >
-                    <div className={styles.resourcesRow}>
-                      {isLoadingResources ? (
-                        <>
-                          {[0, 1].map((index) => (
-                            <div key={index} className={styles.resourceItem}>
-                              <SkeletonText lineCount={1} width="30%" />
-                              <SkeletonPlaceholder
-                                className={styles.resourceSkeletonBar}
-                              />
-                              <div className={styles.resourceStats}>
-                                <SkeletonText lineCount={1} width="35%" />
-                                <SkeletonText lineCount={1} width="40%" />
-                              </div>
-                            </div>
-                          ))}
-                        </>
-                      ) : (
-                        resources.map((resource, index) => {
-                          const percentage = calculatePercentage(
-                            resource.used,
-                            resource.allocated,
-                          );
-
-                          return (
-                            <div key={index} className={styles.resourceItem}>
-                              <h4 className={styles.resourceName}>
-                                {resource.name}
-                              </h4>
-                              <ProgressBar
-                                value={percentage}
-                                max={100}
-                                label="Progress"
-                                helperText=""
-                                hideLabel
-                                className={
-                                  percentage > 90
-                                    ? styles.progressDanger
-                                    : percentage > 80
-                                      ? styles.progressWarning
-                                      : styles.progressSuccess
-                                }
-                              />
-                              <div className={styles.resourceStats}>
-                                <span className={styles.usedValue}>
-                                  {resource.used} {`(${percentage}%)`} used
-                                </span>
-                                <span className={styles.allocatedValue}>
-                                  {resource.used} / {resource.allocated}{" "}
-                                  {resource.unit} allocated
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })
+              </span>
+            )}
+          </>
+        }
+        pageActions={
+          isDigitalAssistant && testAssistantUrl
+            ? [
+                {
+                  key: "test-assistant",
+                  kind: "tertiary",
+                  label: "Test assistant",
+                  onClick: () => {
+                    window.open(
+                      testAssistantUrl,
+                      "_blank",
+                      "noopener,noreferrer",
+                    );
+                  },
+                },
+              ]
+            : []
+        }
+        pageActionsOverflowLabel="More actions"
+        fullWidthGrid="xl"
+        navItems={[
+          { key: "details", label: "Details" },
+          { key: "services", label: "Services" },
+          { key: "integration", label: "Integration endpoints" },
+          ...(acceptsDatasource
+            ? [{ key: "datasources", label: "Data sources" }]
+            : []),
+        ]}
+        activeKey={activeSection}
+        onNavChange={(key) => setActiveSection(key as typeof activeSection)}
+      >
+        {activeSection === "details" && (
+          <>
+            <Grid className={styles.detailsGrid}>
+              <Column sm={4} md={8} lg={16}>
+                <ProductiveCard title="Details" className={styles.detailsCard}>
+                  {(workerInfo?.name || workerInfo?.runtime_type) && (
+                    <div className={styles.workerInfoRow}>
+                      {workerInfo.name && (
+                        <div className={styles.workerInfoField}>
+                          <span className={styles.workerInfoLabel}>
+                            Worker resource
+                          </span>
+                          <span className={styles.workerInfoValue}>
+                            {workerInfo.name}
+                          </span>
+                        </div>
+                      )}
+                      {workerInfo.runtime_type && (
+                        <div className={styles.workerInfoField}>
+                          <span className={styles.workerInfoLabel}>
+                            Deployment type
+                          </span>
+                          <span className={styles.workerInfoValue}>
+                            {WORKER_RUNTIME_LABELS[
+                              workerInfo.runtime_type.toLowerCase()
+                            ]?.label ?? workerInfo.runtime_type}
+                          </span>
+                        </div>
                       )}
                     </div>
+                  )}
+                </ProductiveCard>
+              </Column>
+            </Grid>
 
-                    {/* Accelerator Cards Section - Integrated */}
-                    {acceleratorCards.length > 0 && (
-                      <Column
-                        sm={4}
-                        md={8}
-                        lg={16}
-                        className={styles.acceleratorCardsColumn}
-                      >
-                        <div className={styles.acceleratorCardsItem}>
-                          <h4 className={styles.acceleratorCardsTitle}>
-                            Accelerator cards
-                          </h4>
-                          <Grid className={styles.acceleratorCardsGrid}>
-                            <Column sm={2} md={3} lg={3}>
-                              <ol className={styles.acceleratorCardsList}>
-                                {acceleratorCards
-                                  .slice(
-                                    0,
-                                    Math.ceil(acceleratorCards.length / 2),
-                                  )
-                                  .map((card) => (
-                                    <li
-                                      key={card.id}
-                                      className={styles.acceleratorCardItem}
-                                    >
-                                      {card.label}
-                                    </li>
-                                  ))}
-                              </ol>
-                            </Column>
-                            <Column sm={2} md={3} lg={3}>
-                              <ol
-                                className={styles.acceleratorCardsList}
-                                start={
-                                  Math.ceil(acceleratorCards.length / 2) + 1
-                                }
-                              >
-                                {acceleratorCards
-                                  .slice(Math.ceil(acceleratorCards.length / 2))
-                                  .map((card) => (
-                                    <li
-                                      key={card.id}
-                                      className={styles.acceleratorCardItem}
-                                    >
-                                      {card.label}
-                                    </li>
-                                  ))}
-                              </ol>
-                            </Column>
-                          </Grid>
-                        </div>
-                      </Column>
-                    )}
-                  </ProductiveCard>
-                </Column>
-              </Grid>
-            </>
-          )}
-
-          {activeSection === "services" && (
-            <Grid className={styles.servicesGrid}>
+            <Grid className={styles.resourcesGrid}>
               <Column sm={4} md={8} lg={16}>
                 <ProductiveCard
-                  title={"Services"}
-                  className={styles.detailsCard}
-                ></ProductiveCard>
+                  title="Allocated resources"
+                  className={styles.resourceCard}
+                >
+                  <div className={styles.resourcesRow}>
+                    {isLoadingResources ? (
+                      <>
+                        {[0, 1].map((index) => (
+                          <div key={index} className={styles.resourceItem}>
+                            <SkeletonText lineCount={1} width="30%" />
+                            <SkeletonPlaceholder
+                              className={styles.resourceSkeletonBar}
+                            />
+                            <div className={styles.resourceStats}>
+                              <SkeletonText lineCount={1} width="35%" />
+                              <SkeletonText lineCount={1} width="40%" />
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    ) : (
+                      resources.map((resource, index) => {
+                        const percentage = calculatePercentage(
+                          resource.used,
+                          resource.allocated,
+                        );
+
+                        return (
+                          <div key={index} className={styles.resourceItem}>
+                            <h4 className={styles.resourceName}>
+                              {resource.name}
+                            </h4>
+                            <ProgressBar
+                              value={percentage}
+                              max={100}
+                              label="Progress"
+                              helperText=""
+                              hideLabel
+                              className={
+                                percentage > 90
+                                  ? styles.progressDanger
+                                  : percentage > 80
+                                    ? styles.progressWarning
+                                    : styles.progressSuccess
+                              }
+                            />
+                            <div className={styles.resourceStats}>
+                              <span className={styles.usedValue}>
+                                {resource.used} {`(${percentage}%)`} used
+                              </span>
+                              <span className={styles.allocatedValue}>
+                                {resource.used} / {resource.allocated}{" "}
+                                {resource.unit} allocated
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Accelerator Cards Section - Integrated */}
+                  {acceleratorCards.length > 0 && (
+                    <Column
+                      sm={4}
+                      md={8}
+                      lg={16}
+                      className={styles.acceleratorCardsColumn}
+                    >
+                      <div className={styles.acceleratorCardsItem}>
+                        <h4 className={styles.acceleratorCardsTitle}>
+                          Accelerator cards
+                        </h4>
+                        <Grid className={styles.acceleratorCardsGrid}>
+                          <Column sm={2} md={3} lg={3}>
+                            <ol className={styles.acceleratorCardsList}>
+                              {acceleratorCards
+                                .slice(
+                                  0,
+                                  Math.ceil(acceleratorCards.length / 2),
+                                )
+                                .map((card) => (
+                                  <li
+                                    key={card.id}
+                                    className={styles.acceleratorCardItem}
+                                  >
+                                    {card.label}
+                                  </li>
+                                ))}
+                            </ol>
+                          </Column>
+                          <Column sm={2} md={3} lg={3}>
+                            <ol
+                              className={styles.acceleratorCardsList}
+                              start={Math.ceil(acceleratorCards.length / 2) + 1}
+                            >
+                              {acceleratorCards
+                                .slice(Math.ceil(acceleratorCards.length / 2))
+                                .map((card) => (
+                                  <li
+                                    key={card.id}
+                                    className={styles.acceleratorCardItem}
+                                  >
+                                    {card.label}
+                                  </li>
+                                ))}
+                            </ol>
+                          </Column>
+                        </Grid>
+                      </div>
+                    </Column>
+                  )}
+                </ProductiveCard>
               </Column>
-              {serviceData.map((deploymentServiceData) => (
-                <Column key={deploymentServiceData.id} sm={4} md={8} lg={16}>
-                  <ProductiveCard
-                    title={deploymentServiceData.title}
-                    description={deploymentServiceData.description}
-                    className={styles.serviceCard}
-                  >
-                    <div className={styles.serviceDetails}>
+            </Grid>
+          </>
+        )}
+
+        {activeSection === "services" && (
+          <Grid className={styles.servicesGrid}>
+            <Column sm={4} md={8} lg={16}>
+              <ProductiveCard
+                title={"Services"}
+                className={styles.detailsCard}
+              ></ProductiveCard>
+            </Column>
+            {serviceData.map((deploymentServiceData) => (
+              <Column key={deploymentServiceData.id} sm={4} md={8} lg={16}>
+                <ProductiveCard
+                  title={deploymentServiceData.title}
+                  description={deploymentServiceData.description}
+                  className={styles.serviceCard}
+                >
+                  <div className={styles.serviceDetails}>
+                    <div className={styles.serviceDetailRow}>
+                      <span className={styles.serviceDetailLabel}>
+                        Service version
+                      </span>
+                      <span className={styles.serviceDetailValue}>
+                        {formatVersion(deploymentServiceData.serviceVersion)}
+                      </span>
+                    </div>
+
+                    {deploymentServiceData.embeddingModel && (
                       <div className={styles.serviceDetailRow}>
                         <span className={styles.serviceDetailLabel}>
-                          Service version
+                          Embedding model
                         </span>
                         <span className={styles.serviceDetailValue}>
-                          {formatVersion(deploymentServiceData.serviceVersion)}
+                          {deploymentServiceData.embeddingModel}
                         </span>
                       </div>
+                    )}
 
-                      {deploymentServiceData.embeddingModel && (
-                        <div className={styles.serviceDetailRow}>
-                          <span className={styles.serviceDetailLabel}>
-                            Embedding model
-                          </span>
-                          <span className={styles.serviceDetailValue}>
-                            {deploymentServiceData.embeddingModel}
-                          </span>
-                        </div>
-                      )}
+                    {deploymentServiceData.vectorStore && (
+                      <div className={styles.serviceDetailRow}>
+                        <span className={styles.serviceDetailLabel}>
+                          Vector store
+                        </span>
+                        <span className={styles.serviceDetailValue}>
+                          {deploymentServiceData.vectorStore}
+                        </span>
+                      </div>
+                    )}
 
-                      {deploymentServiceData.vectorStore && (
-                        <div className={styles.serviceDetailRow}>
-                          <span className={styles.serviceDetailLabel}>
-                            Vector store
-                          </span>
-                          <span className={styles.serviceDetailValue}>
-                            {deploymentServiceData.vectorStore}
-                          </span>
-                        </div>
-                      )}
+                    {deploymentServiceData.largeLanguageModel && (
+                      <div className={styles.serviceDetailRow}>
+                        <span className={styles.serviceDetailLabel}>
+                          Large Language Model (LLM)
+                        </span>
+                        <span className={styles.serviceDetailValue}>
+                          {deploymentServiceData.largeLanguageModel}
+                        </span>
+                      </div>
+                    )}
 
-                      {deploymentServiceData.largeLanguageModel && (
-                        <div className={styles.serviceDetailRow}>
-                          <span className={styles.serviceDetailLabel}>
-                            Large Language Model (LLM)
-                          </span>
-                          <span className={styles.serviceDetailValue}>
-                            {deploymentServiceData.largeLanguageModel}
-                          </span>
-                        </div>
-                      )}
+                    {deploymentServiceData.rankerModel && (
+                      <div className={styles.serviceDetailRow}>
+                        <span className={styles.serviceDetailLabel}>
+                          Reranker model
+                        </span>
+                        <span className={styles.serviceDetailValue}>
+                          {deploymentServiceData.rankerModel}
+                        </span>
+                      </div>
+                    )}
 
-                      {deploymentServiceData.rankerModel && (
-                        <div className={styles.serviceDetailRow}>
-                          <span className={styles.serviceDetailLabel}>
-                            Reranker model
-                          </span>
-                          <span className={styles.serviceDetailValue}>
-                            {deploymentServiceData.rankerModel}
-                          </span>
-                        </div>
-                      )}
+                    {deploymentServiceData.customComponents?.map(
+                      (customComponent) => (
+                        <React.Fragment key={customComponent.label}>
+                          <div className={styles.serviceDetailRow}>
+                            <span className={styles.serviceDetailLabel}>
+                              {customComponent.label}
+                            </span>
+                            <span className={styles.serviceDetailValue}>
+                              {customComponent.model ??
+                                customComponent.providerName ??
+                                "Unknown"}
+                            </span>
+                          </div>
+                          {customComponent.model &&
+                            customComponent.providerName && (
+                              <div className={styles.serviceDetailRow}>
+                                <span className={styles.serviceDetailLabel}>
+                                  {customComponent.label} backend
+                                </span>
+                                <span className={styles.serviceDetailValue}>
+                                  {customComponent.providerName}
+                                </span>
+                              </div>
+                            )}
+                        </React.Fragment>
+                      ),
+                    )}
 
-                      {deploymentServiceData.customComponents?.map(
-                        (customComponent) => (
-                          <React.Fragment key={customComponent.label}>
-                            <div className={styles.serviceDetailRow}>
-                              <span className={styles.serviceDetailLabel}>
-                                {customComponent.label}
-                              </span>
-                              <span className={styles.serviceDetailValue}>
-                                {customComponent.model ??
-                                  customComponent.providerName ??
-                                  "Unknown"}
-                              </span>
-                            </div>
-                            {customComponent.model &&
-                              customComponent.providerName && (
-                                <div className={styles.serviceDetailRow}>
-                                  <span className={styles.serviceDetailLabel}>
-                                    {customComponent.label} backend
-                                  </span>
-                                  <span className={styles.serviceDetailValue}>
-                                    {customComponent.providerName}
-                                  </span>
-                                </div>
-                              )}
-                          </React.Fragment>
-                        ),
-                      )}
-
-                      {deploymentServiceData.inferenceBackend && (
-                        <div className={styles.serviceDetailRow}>
-                          <span className={styles.serviceDetailLabel}>
-                            Inference backend
-                          </span>
-                          <span className={styles.serviceDetailValue}>
-                            {deploymentServiceData.inferenceBackend}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </ProductiveCard>
-                </Column>
-              ))}
-            </Grid>
-          )}
-
-          {activeSection === "datasources" && acceptsDatasource && (
-            <ApplicationDatasourcesTable
-              applicationId={deployment.id}
-              onDatasourceCountChange={(count) => setDatasourceCount(count)}
-            />
-          )}
-
-          {activeSection === "integration" && (
-            <Grid className={styles.servicesGrid}>
-              <Column sm={4} md={8} lg={16}>
-                <ProductiveCard
-                  title={"Integration endpoints"}
-                  className={styles.detailsCard}
-                ></ProductiveCard>
+                    {deploymentServiceData.inferenceBackend && (
+                      <div className={styles.serviceDetailRow}>
+                        <span className={styles.serviceDetailLabel}>
+                          Inference backend
+                        </span>
+                        <span className={styles.serviceDetailValue}>
+                          {deploymentServiceData.inferenceBackend}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </ProductiveCard>
               </Column>
-              {integrationFetchError && (
-                <Column sm={4} md={8} lg={16}>
-                  <ToastNotification
-                    aria-label="close notification"
-                    kind="error"
-                    title="Failed to load integration endpoints"
-                    subtitle={integrationFetchError}
-                    hideCloseButton
-                    className={styles.toastNotification}
-                  />
-                </Column>
-              )}
-              {integrationEndpoints.map((integrationEndpointsData) => (
-                <Column key={integrationEndpointsData.id} sm={4} md={8} lg={16}>
-                  <ProductiveCard
-                    title={integrationEndpointsData.title}
-                    description={integrationEndpointsData.description}
-                    className={styles.serviceCard}
-                  >
-                    <Grid className={styles.integrationEndpointGrid}>
-                      <Column sm={4} md={8} lg={16}>
-                        <div className={styles.integrationEndpointLeftColumn}>
+            ))}
+          </Grid>
+        )}
+
+        {activeSection === "datasources" && acceptsDatasource && (
+          <ApplicationDatasourcesTable
+            applicationId={deployment.id}
+            onDatasourceCountChange={(count) => setDatasourceCount(count)}
+          />
+        )}
+
+        {activeSection === "integration" && (
+          <Grid className={styles.servicesGrid}>
+            <Column sm={4} md={8} lg={16}>
+              <ProductiveCard
+                title={"Integration endpoints"}
+                className={styles.detailsCard}
+              ></ProductiveCard>
+            </Column>
+            {integrationFetchError && (
+              <Column sm={4} md={8} lg={16}>
+                <ToastNotification
+                  aria-label="close notification"
+                  kind="error"
+                  title="Failed to load integration endpoints"
+                  subtitle={integrationFetchError}
+                  hideCloseButton
+                  className={styles.toastNotification}
+                />
+              </Column>
+            )}
+            {integrationEndpoints.map((integrationEndpointsData) => (
+              <Column key={integrationEndpointsData.id} sm={4} md={8} lg={16}>
+                <ProductiveCard
+                  title={integrationEndpointsData.title}
+                  description={integrationEndpointsData.description}
+                  className={styles.serviceCard}
+                >
+                  <Grid className={styles.integrationEndpointGrid}>
+                    <Column sm={4} md={8} lg={16}>
+                      <div className={styles.integrationEndpointLeftColumn}>
+                        <div className={styles.integrationEndpointField}>
+                          <span
+                            className={styles.integrationEndpointDetailLabel}
+                          >
+                            Base hostname or url
+                          </span>
+                          <span
+                            className={styles.integrationEndpointDetailValue}
+                          >
+                            <a
+                              href={integrationEndpointsData.baseURL}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {integrationEndpointsData.baseURL}
+                            </a>
+                          </span>
+                        </div>
+
+                        {integrationEndpointsData.apiDocumentation && (
                           <div className={styles.integrationEndpointField}>
                             <span
                               className={styles.integrationEndpointDetailLabel}
                             >
-                              Base hostname or url
+                              API documentation
                             </span>
                             <span
                               className={styles.integrationEndpointDetailValue}
                             >
                               <a
-                                href={integrationEndpointsData.baseURL}
+                                href={integrationEndpointsData.apiDocumentation}
                                 target="_blank"
                                 rel="noopener noreferrer"
                               >
-                                {integrationEndpointsData.baseURL}
+                                {integrationEndpointsData.apiDocumentation}
                               </a>
                             </span>
                           </div>
+                        )}
 
-                          {integrationEndpointsData.apiDocumentation && (
-                            <div className={styles.integrationEndpointField}>
-                              <span
-                                className={
-                                  styles.integrationEndpointDetailLabel
-                                }
-                              >
-                                API documentation
-                              </span>
-                              <span
-                                className={
-                                  styles.integrationEndpointDetailValue
-                                }
-                              >
-                                <a
-                                  href={
-                                    integrationEndpointsData.apiDocumentation
+                        {integrationEndpointsData.mcpEndpoint && (
+                          <div className={styles.integrationEndpointField}>
+                            <span
+                              className={styles.integrationEndpointDetailLabel}
+                            >
+                              MCP endpoint
+                            </span>
+                            <span
+                              className={`${styles.integrationEndpointDetailValue} ${styles.integrationEndpointCopyValue}`}
+                            >
+                              {integrationEndpointsData.mcpEndpoint}
+                              {canCopyToClipboard && (
+                                <CopyButton
+                                  size="xs"
+                                  feedback="Copied to clipboard"
+                                  iconDescription="Copy MCP endpoint"
+                                  onClick={() =>
+                                    handleCopyMcpEndpoint(
+                                      integrationEndpointsData.mcpEndpoint,
+                                    )
                                   }
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  {integrationEndpointsData.apiDocumentation}
-                                </a>
-                              </span>
-                            </div>
-                          )}
-
-                          {integrationEndpointsData.mcpEndpoint && (
-                            <div className={styles.integrationEndpointField}>
-                              <span
-                                className={
-                                  styles.integrationEndpointDetailLabel
-                                }
-                              >
-                                MCP endpoint
-                              </span>
-                              <span
-                                className={
-                                  styles.integrationEndpointDetailValue
-                                }
-                              >
-                                <a
-                                  href={integrationEndpointsData.mcpEndpoint}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  {integrationEndpointsData.mcpEndpoint}
-                                </a>
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </Column>
-                    </Grid>
-                  </ProductiveCard>
-                </Column>
-              ))}
-            </Grid>
-          )}
-        </Column>
-      </Grid>
+                                />
+                              )}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </Column>
+                  </Grid>
+                </ProductiveCard>
+              </Column>
+            ))}
+          </Grid>
+        )}
+      </DetailsLayout>
     </>
   );
 };

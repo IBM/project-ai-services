@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -24,6 +25,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -44,8 +46,9 @@ const (
 type Gateway struct {
 	workerpb.UnimplementedWorkerGatewayServer
 
-	registry   *registry.Registry
-	grpcServer *grpc.Server
+	registry    *registry.Registry
+	runtimeType types.RuntimeType
+	grpcServer  *grpc.Server
 
 	// PKI material — loaded or generated from pkiDir on first start (see pki.go).
 	caCert     *x509.Certificate
@@ -66,11 +69,12 @@ func New(ctx context.Context, reg *registry.Registry, runtimeType types.RuntimeT
 	}
 
 	return &Gateway{
-		registry:   reg,
-		caCert:     pki.caCert,
-		caKey:      pki.caKey,
-		serverCert: pki.serverCert,
-		caCertPool: pki.caCertPool,
+		registry:    reg,
+		runtimeType: runtimeType,
+		caCert:      pki.caCert,
+		caKey:       pki.caKey,
+		serverCert:  pki.serverCert,
+		caCertPool:  pki.caCertPool,
 	}, nil
 }
 
@@ -166,7 +170,14 @@ func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (
 		return nil, status.Errorf(codes.InvalidArgument, "CSR is required")
 	}
 
-	tlsCertPEM, caCertPEM, notAfter, signErr := signWorkerCSR(csrPEM, workerName, g.caCert, g.caKey)
+	runtimeType := types.RuntimeType(req.GetRuntimeType())
+	dnsNames := workerCertDNSNames(workerName, runtimeType, req.GetMetadata())
+	if len(dnsNames) == 0 {
+		logger.WarningfCtx(ctx, "WorkerGateway: worker=%s (runtime=%s) produced no DNS SANs — private-ingress hostname verification against this worker will fail",
+			workerName, runtimeType)
+	}
+
+	tlsCertPEM, caCertPEM, notAfter, signErr := signWorkerCSR(csrPEM, workerName, dnsNames, g.caCert, g.caKey)
 	if signErr != nil {
 		logger.WarningfCtx(ctx, "WorkerGateway: CSR error for worker=%s: %v", workerName, signErr)
 
@@ -205,8 +216,12 @@ func (g *Gateway) CommandStream(stream grpc.BidiStreamingServer[workerpb.Command
 	}
 
 	// goroutine: read results from the worker and dispatch to waiting callers.
-	recvErrCh := make(chan error, 1)
+	const recvErrBufSize = 2
+	recvErrCh := make(chan error, recvErrBufSize)
 	go g.recvLoop(ctx, stream, workerName, recvErrCh)
+
+	// Give the worker a route to LiteLLM on the control plane; needs recvLoop to read the reply.
+	go g.registerLiteLLMEgress(ctx, workerName, recvErrCh)
 
 	// Main loop: pull Commands from the worker's CommandCh and send them downstream.
 	for {
@@ -261,26 +276,13 @@ func (g *Gateway) identifyWorker(ctx context.Context, stream grpc.BidiStreamingS
 		return "", nil, status.Error(codes.InvalidArgument, "CommandStream: first message missing worker_name")
 	}
 
-	entry, ok := g.registry.Get(workerName)
-	if !ok {
-		// No in-memory entry — either the control plane restarted or the worker is
-		// reconnecting after a clean disconnect. Attempt to restore the entry from
-		// the DB. The authStreamInterceptor already verified the cert chain via
-		// enforceClientCert, and the worker name in the first message is derived from
-		// the cert CN on the worker side, so it is trustworthy.
-		restored, restoreErr := g.registry.Restore(ctx, workerName)
-		if restoreErr != nil {
-			if errors.Is(restoreErr, registry.ErrWorkerNotFound) {
-				return "", nil, status.Errorf(codes.Unauthenticated,
-					"CommandStream: worker %s not registered — call Register first", workerName)
-			}
+	if err = verifyWorkerIdentity(ctx, stream.Context(), workerName); err != nil {
+		return "", nil, err
+	}
 
-			return "", nil, fmt.Errorf("CommandStream: restore registry entry for %s: %w", workerName, restoreErr)
-		}
-
-		logger.InfofCtx(ctx, "WorkerGateway: restored registry entry for worker %s (DB status was %s)",
-			workerName, "disconnected or ready")
-		entry = restored
+	entry, err := g.lookupOrRestoreEntry(ctx, workerName)
+	if err != nil {
+		return "", nil, err
 	}
 
 	logger.InfofCtx(ctx, "WorkerGateway: CommandStream opened for worker %s", workerName)
@@ -293,6 +295,67 @@ func (g *Gateway) identifyWorker(ctx context.Context, stream grpc.BidiStreamingS
 	}
 
 	return workerName, entry, nil
+}
+
+// verifyWorkerIdentity checks that the authenticated mTLS cert CN (from the TLS
+// interceptor context, falling back to the peer auth info) matches workerName.
+func verifyWorkerIdentity(ctx, streamCtx context.Context, workerName string) error {
+	authenticatedWorker, _ := ctx.Value(authenticatedWorkerKey).(string)
+	if authenticatedWorker == "" {
+		authenticatedWorker = peerCertCommonName(streamCtx)
+	}
+
+	if authenticatedWorker != "" && !strings.EqualFold(authenticatedWorker, workerName) {
+		logger.WarningfCtx(ctx, "WorkerGateway: worker identity mismatch: cert CN=%q does not match worker_name=%q",
+			authenticatedWorker, workerName)
+
+		return status.Errorf(codes.PermissionDenied,
+			"CommandStream: client certificate CN %q does not match worker_name %q",
+			authenticatedWorker, workerName)
+	}
+
+	return nil
+}
+
+// peerCertCommonName returns the CN of the verified client certificate from the
+// peer's TLS info, or "" if unavailable. Used when the interceptor didn't run.
+func peerCertCommonName(streamCtx context.Context) string {
+	p, ok := peer.FromContext(streamCtx)
+	if !ok || p.AuthInfo == nil {
+		return ""
+	}
+	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok || len(tlsInfo.State.VerifiedChains) == 0 || len(tlsInfo.State.VerifiedChains[0]) == 0 {
+		return ""
+	}
+
+	return tlsInfo.State.VerifiedChains[0][0].Subject.CommonName
+}
+
+// lookupOrRestoreEntry returns the in-memory registry entry for workerName. On a
+// miss — control plane restart or reconnect after a clean disconnect — it attempts
+// to restore the entry from the DB. The authStreamInterceptor already verified the
+// cert chain via enforceClientCert, and the worker name in the first message is
+// derived from the cert CN on the worker side, so it is trustworthy.
+func (g *Gateway) lookupOrRestoreEntry(ctx context.Context, workerName string) (*registry.WorkerEntry, error) {
+	if entry, ok := g.registry.Get(workerName); ok {
+		return entry, nil
+	}
+
+	restored, err := g.registry.Restore(ctx, workerName)
+	if err != nil {
+		if errors.Is(err, registry.ErrWorkerNotFound) {
+			return nil, status.Errorf(codes.Unauthenticated,
+				"CommandStream: worker %s not registered — call Register first", workerName)
+		}
+
+		return nil, fmt.Errorf("CommandStream: restore registry entry for %s: %w", workerName, err)
+	}
+
+	logger.InfofCtx(ctx, "WorkerGateway: restored registry entry for worker %s (DB status was %s)",
+		workerName, "disconnected or ready")
+
+	return restored, nil
 }
 
 // recvLoop reads CommandResults from the stream and dispatches them to waiting callers.

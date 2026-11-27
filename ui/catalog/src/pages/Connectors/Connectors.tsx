@@ -3,6 +3,7 @@ import { PageHeader } from "@carbon/ibm-products";
 import DataSourceConnectorsTable from "@/components/DataSourceConnectorsTable";
 import AddDataSourceModal from "@/components/AddDataSourceModal";
 import { useConnectorsStore } from "@/store/connectors.store";
+import { PAGE_TITLES, PAGE_SUBTITLES } from "@/constants";
 import styles from "./Connectors.module.scss";
 
 const Connectors = () => {
@@ -18,8 +19,8 @@ const Connectors = () => {
   return (
     <div id="connectors-page-content" className={styles.connectorsContainer}>
       <PageHeader
-        title="Connectors"
-        subtitle="Pre-built integrations with data workflows to connect and synchronize with data sources, exchange data between services, and push outputs to data sinks. Connectors reduce integration effort and accelerate end-to-end AI and data workflows."
+        title={PAGE_TITLES.DATA_CONNECTORS}
+        subtitle={PAGE_SUBTITLES.DATA_CONNECTORS}
       />
       <DataSourceConnectorsTable
         onAdd={() => setIsAddModalOpen(true)}

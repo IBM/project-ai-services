@@ -1,0 +1,86 @@
+@use "carbonTokens" as *;
+
+.cardsGrid {
+  margin-top: $spacing-05;
+  row-gap: $spacing-05;
+}
+
+.card {
+  width: 100%;
+}
+
+.card :global(.c4p--card__title) {
+  font-family: var(--cds-heading-03-font-family);
+  font-size: var(--cds-heading-03-font-size);
+  font-weight: var(--cds-heading-03-font-weight);
+  line-height: var(--cds-heading-03-line-height);
+}
+
+.deploymentName {
+  max-width: 20rem;
+  margin-bottom: $spacing-06;
+}
+
+.detailRows {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-04;
+}
+
+.detailRow {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: $spacing-05;
+}
+
+.detailLabel {
+  @include type-style("caption-01");
+  color: $text-secondary;
+  flex-shrink: 0;
+  min-width: 15rem;
+}
+
+.detailValue {
+  @include type-style("body-01");
+  color: $text-primary;
+  word-break: break-word;
+  flex: 1;
+}
+
+.link {
+  color: $link-primary;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+    color: $link-primary-hover;
+  }
+}
+
+.endpointBlock {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-04;
+  margin-bottom: $spacing-06;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.certifiedBadge {
+  @include type-style("label-01");
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-02;
+}
+
+.badgeIcon {
+  color: var(--cds-support-success);
+  min-width: $spacing-05;
+}
+
+.badgeName {
+  color: var(--cds-text-secondary);
+}

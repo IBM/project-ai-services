@@ -169,10 +169,6 @@ func TestOpenShiftOnlyOperations(t *testing.T) {
 	if len(routes) != 0 {
 		t.Errorf("expected 0 routes after uninstall, got %d", len(routes))
 	}
-
-	if err := ocp.WaitForInferenceServiceReady(ctx, "llm"); err != nil {
-		t.Errorf("openshift mock: WaitForInferenceServiceReady: %v", err)
-	}
 }
 
 func TestGetSystemInfoReportsSpyreCards(t *testing.T) {

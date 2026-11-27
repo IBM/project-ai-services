@@ -1,29 +1,40 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: ai-services-catalog-sa
+  # Namespace-qualified so each catalog deployment on the same cluster owns its own SA.
+  name: {{ .Release.Namespace }}-catalog-sa
   namespace: {{ .Release.Namespace }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: ai-services-catalog-reader
+  # Namespace-qualified so that multiple catalog deployments on the same cluster
+  # (e.g. ai-services-dev, ai-services-staging) each own their own ClusterRole
+  # and do not conflict with each other's Helm release-namespace annotation.
+  name: {{ .Release.Namespace }}-catalog-reader
 rules:
   # Required by GatewayRouteHost to look up the catalog-worker-gateway Route host
-  # in order to embed the correct DNS SAN in the server certificate and bootstrap token.
+  # in order to embed the correct DNS SAN in the server certificate and bootstrap token,
+  # and by ModelGatewayRouteHost to look up the model-gateway Route host for the model endpoint URL.
   - apiGroups: ["route.openshift.io"]
     resources: ["routes"]
+    verbs: ["get", "list"]
+  # Required by the catalog deployer to wait for a deployed InferenceService to report Ready
+  # (WaitForInferenceServiceReady), which it now does itself instead of through the worker.
+  - apiGroups: ["serving.kserve.io"]
+    resources: ["inferenceservices"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: ai-services-catalog-reader-binding
+  # Namespace-qualified to match the ClusterRole above.
+  name: {{ .Release.Namespace }}-catalog-reader-binding
 subjects:
   - kind: ServiceAccount
-    name: ai-services-catalog-sa
+    name: {{ .Release.Namespace }}-catalog-sa
     namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
-  name: ai-services-catalog-reader
+  name: {{ .Release.Namespace }}-catalog-reader
   apiGroup: rbac.authorization.k8s.io
