@@ -73,6 +73,19 @@ const modelsDeployFlowReducer = (
       return state.selectedModelId === action.payload
         ? state
         : { ...state, selectedModelId: action.payload, ...EMPTY_MODEL_CONFIG };
+    case ACTION_TYPES.UPDATE_FORM_DATA: {
+      const next = sharedDeployFlowReducer(state, action);
+      // The shared reducer only checks the name is non-empty; keep the error
+      // up until the name also passes the model-name rule
+      return "name" in action.payload
+        ? {
+            ...next,
+            showStepOneNameError:
+              state.showStepOneNameError &&
+              !isValidModelName(action.payload.name ?? ""),
+          }
+        : next;
+    }
     case ACTION_TYPES.SET_MODEL_CONFIG:
       return { ...state, ...action.payload };
     case ACTION_TYPES.RESET_STATE:
