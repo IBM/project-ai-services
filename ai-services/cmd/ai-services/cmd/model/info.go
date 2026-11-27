@@ -94,15 +94,14 @@ func renderModelInfo(d *models.ModelDetail) string {
 		}
 	}
 
-	b.WriteString("Applications:")
-	if len(d.Applications) == 0 {
-		fmt.Fprintf(&b, " %s", emptyValue)
-	}
-	for _, a := range d.Applications {
-		fmt.Fprintf(&b, "\n  - %s", a.Name)
+	if len(d.Applications) > 0 {
+		b.WriteString("Applications:\n")
+		for _, a := range d.Applications {
+			fmt.Fprintf(&b, "  - %s\n", a.Name)
+		}
 	}
 
-	return b.String()
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func workerString(d *models.ModelDetail) string {

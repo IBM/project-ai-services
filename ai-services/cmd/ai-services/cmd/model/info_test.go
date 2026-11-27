@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -53,7 +54,8 @@ func TestRenderModelInfo_RemoteNoWorkerNoApps(t *testing.T) {
 	out := renderModelInfo(d)
 
 	assert.Contains(t, out, "Worker:             -")
-	assert.Contains(t, out, "Parameters:\n  api_base: https://x\n  project_id: p1\n")
+	assert.Contains(t, out, "Parameters:\n  api_base: https://x\n  project_id: p1")
 	assert.NotContains(t, out, "Endpoints:")
-	assert.Contains(t, out, "Applications: -")
+	assert.NotContains(t, out, "Applications:")
+	assert.False(t, strings.HasSuffix(out, "\n"))
 }
