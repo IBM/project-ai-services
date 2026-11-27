@@ -78,6 +78,11 @@ export async function fetchAllModels(): Promise<ModelDeployment[]> {
   return allData;
 }
 
+// Deletes a model deployment by ID
+export async function deleteModel(id: string): Promise<void> {
+  await api.delete(MODEL_MANAGEMENT_ENDPOINTS.DELETE_MODEL(id));
+}
+
 // Fetches the detail of a single model deployment by ID
 export async function fetchModelDeployment(
   id: string,

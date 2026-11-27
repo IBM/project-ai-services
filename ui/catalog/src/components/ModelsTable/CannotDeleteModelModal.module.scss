@@ -1,0 +1,26 @@
+@use "@carbon/styles/scss/spacing" as *;
+@use "@carbon/styles/scss/theme" as *;
+@use "@carbon/styles/scss/type" as *;
+
+.modalBody {
+  padding-block-end: $spacing-05;
+}
+
+.description {
+  @include type-style("body-01");
+  color: $text-secondary;
+  margin-block-end: $spacing-04;
+}
+
+.loadingWrapper {
+  margin-block: $spacing-04;
+}
+
+.errorNotification {
+  margin-block: $spacing-03;
+}
+
+.servicesList {
+  margin-block-start: $spacing-03;
+  margin-block-end: 0;
+}
