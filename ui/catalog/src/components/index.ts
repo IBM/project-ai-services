@@ -27,6 +27,12 @@ export type { DetailsLayoutProps, DetailsLayoutNavItem } from "./DetailsLayout";
 export { default as StatusTag } from "./StatusTag";
 export { default as InlineEditableTitle } from "./InlineEditableTitle";
 export type { InlineEditableTitleProps } from "./InlineEditableTitle";
+export { default as FilterPanel } from "./FilterPanel";
+export type {
+  FilterOption,
+  FilterGroupConfig,
+  FilterPanelProps,
+} from "./FilterPanel";
 export { ModelCard, ModelCardSkeleton } from "./ModelCard";
 export type { ModelCardProps } from "./ModelCard";
 export { default as ModelDetailPanel } from "./ModelDetailPanel";

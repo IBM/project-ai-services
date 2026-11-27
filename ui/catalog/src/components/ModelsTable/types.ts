@@ -23,18 +23,26 @@ export interface ModelDeploymentRow {
   actions: string;
 }
 
-// Switch to `interface ... extends BaseTableState<...>` once table-specific
-// state (e.g. a details panel) is added, as in the other tables.
-export type AppState = BaseTableState<ModelDeploymentRow>;
+export interface AppState extends BaseTableState<ModelDeploymentRow> {
+  // Model-specific: selected filter values (provider ids / model identifiers)
+  selectedProviders: string[];
+  selectedModels: string[];
+}
 
 export const ACTION_TYPES = {
   FETCH_MODELS_SUCCESS: "FETCH_MODELS_SUCCESS",
+  SET_FILTERS: "SET_FILTERS",
 } as const;
 
-export type AppAction = {
-  type: typeof ACTION_TYPES.FETCH_MODELS_SUCCESS;
-  payload: { rows: ModelDeploymentRow[]; total: number };
-};
+export type AppAction =
+  | {
+      type: typeof ACTION_TYPES.FETCH_MODELS_SUCCESS;
+      payload: { rows: ModelDeploymentRow[]; total: number };
+    }
+  | {
+      type: typeof ACTION_TYPES.SET_FILTERS;
+      payload: { providers: string[]; models: string[] };
+    };
 
 // Table headers — 9 visible columns + actions overflow
 export const HEADERS: DataTableHeader[] = [
@@ -84,6 +92,8 @@ export const INITIAL_STATE: AppState = {
   exportToastOpen: false,
   exportToastMessage: "",
   exportToastKind: "success",
+  selectedProviders: [],
+  selectedModels: [],
   isLoading: true,
   fetchError: null,
 };
@@ -97,6 +107,13 @@ function ownCases(state: AppState, action: AppAction): AppState {
         rowsData: action.payload.rows,
         totalItems: action.payload.total,
         fetchError: null,
+      };
+    case ACTION_TYPES.SET_FILTERS:
+      return {
+        ...state,
+        selectedProviders: action.payload.providers,
+        selectedModels: action.payload.models,
+        page: 1,
       };
   }
 }

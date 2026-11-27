@@ -682,6 +682,15 @@ export interface ModelDeploymentsListResponse {
   pagination: PaginationMetadata;
 }
 
+export interface FetchModelsPageParams {
+  page: number;
+  pageSize: number;
+  /** Provider ids (Backend filter) — matches any of the given values. */
+  providerIds?: string[];
+  /** Model identifiers (Model filter) — matches any of the given values. */
+  models?: string[];
+}
+
 export interface ModelApplication {
   id: string;
   name: string;

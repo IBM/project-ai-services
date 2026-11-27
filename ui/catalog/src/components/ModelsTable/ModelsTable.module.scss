@@ -1,6 +1,8 @@
 @use "carbonTokens" as *;
 
 .tableContent {
+  display: flex;
+  align-items: stretch;
   padding: $spacing-05;
 
   :global(.cds--data-table) {
@@ -35,6 +37,16 @@
   padding: $spacing-07;
 }
 
+.tableGrid {
+  flex: 1;
+  min-width: 0;
+}
+
 .tableColumn {
   margin: 0;
+}
+
+.loadingTable {
+  opacity: 0.4;
+  pointer-events: none;
 }
