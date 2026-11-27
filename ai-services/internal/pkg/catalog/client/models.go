@@ -12,6 +12,16 @@ type ListApplicationsParams struct {
 	CatalogID string
 }
 
+// ListModelsParams holds optional query parameters for listing models.
+type ListModelsParams struct {
+	// Page is the page number (1-indexed). Default: 1
+	Page int
+	// PageSize is the number of items per page (max: 100). Default: 20
+	PageSize int
+	// Search is a case-insensitive substring match on the model name.
+	Search string
+}
+
 // DeleteApplicationParams holds optional query parameters for deleting applications.
 type DeleteApplicationParams struct {
 	// KeepData preserves underlying data (volumes of databases/service resources) when true. Default: false
