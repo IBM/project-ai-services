@@ -149,7 +149,7 @@ func (d *OpenShiftDeployer) deployComponent(ctx context.Context, plan *Deploymen
 	}
 
 	// The InferenceService is named after the component type.
-	if err := openshiftutils.WaitForInferenceServiceReady(ctx, d.runtime, fsys, comp.CatalogPath, comp.ComponentType); err != nil {
+	if err := openshiftutils.WaitForInferenceService(ctx, d.runtime, fsys, comp.CatalogPath, comp.ComponentType); err != nil {
 		return err
 	}
 

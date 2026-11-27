@@ -28,7 +28,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -394,7 +393,8 @@ func (kc *OpenshiftClient) ContainerLogs(ctx context.Context, containerNameOrID 
 }
 
 // ListCRD populates list resources based on input
-// resources in the client namespace that carry every label key in filters["label"].
+// resources in the client namespace that carry every label key in filters["label"]
+// and, when filters["name"] is set, whose metadata.name equals its first value.
 func (kc *OpenshiftClient) ListCRD(ctx context.Context, list *unstructured.UnstructuredList, filters map[string][]string) ([]types.CRDResource, error) {
 	labelKeys := []string{}
 	if labelFilters, exists := filters["label"]; exists {
@@ -406,16 +406,17 @@ func (kc *OpenshiftClient) ListCRD(ctx context.Context, list *unstructured.Unstr
 		client.HasLabels(labelKeys),
 	}
 
+	if names := filters["name"]; len(names) > 0 {
+		opts = append(opts, client.MatchingFields{"metadata.name": names[0]})
+	}
+
 	if err := kc.Client.List(ctx, list, opts...); err != nil {
 		return nil, fmt.Errorf("failed to list CRD resources : %w", err)
 	}
 
 	result := make([]types.CRDResource, 0, len(list.Items))
-	for _, item := range list.Items {
-		result = append(result, types.CRDResource{
-			Name:   item.GetName(),
-			Labels: item.GetLabels(),
-		})
+	for i := range list.Items {
+		result = append(result, toOpenShiftCRDResource(&list.Items[i]))
 	}
 
 	return result, nil
@@ -872,54 +873,6 @@ func (kc *OpenshiftClient) isDeploymentReady(ctx context.Context, name string) (
 	return s.UpdatedReplicas == desired &&
 		s.Replicas == desired &&
 		s.AvailableReplicas == desired, nil
-}
-
-// WaitForInferenceServiceReady polls the KServe InferenceService with the given name in the
-// client's namespace until its Ready condition is True, or the context is cancelled.
-func (kc *OpenshiftClient) WaitForInferenceServiceReady(ctx context.Context, isvcName string) error {
-	isvc := &unstructured.Unstructured{}
-	isvc.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "serving.kserve.io",
-		Version: "v1beta1",
-		Kind:    "InferenceService",
-	})
-
-	for {
-		err := kc.Client.Get(ctx, client.ObjectKey{Namespace: kc.Namespace, Name: isvcName}, isvc)
-		if err != nil {
-			if k8serrors.IsNotFound(err) {
-				return nil
-			}
-
-			return fmt.Errorf("failed to get InferenceService %q: %w", isvcName, err)
-		}
-
-		conditions, _, _ := unstructured.NestedSlice(isvc.Object, "status", "conditions")
-		for _, c := range conditions {
-			cond, ok := c.(map[string]any)
-			if !ok {
-				continue
-			}
-
-			if cond["type"] == "Ready" {
-				if fmt.Sprint(cond["status"]) == "True" {
-					logger.InfofCtx(ctx, "InferenceService %q is ready\n", isvcName)
-
-					return nil
-				}
-
-				break
-			}
-		}
-
-		logger.InfofCtx(ctx, "InferenceService %q not ready yet, retrying in %s\n", isvcName, constants.IsvcPollInterval)
-
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timed out waiting for InferenceService %q to become ready: %w", isvcName, ctx.Err())
-		case <-time.After(constants.IsvcPollInterval):
-		}
-	}
 }
 
 // rolloutRestartDeployment triggers a rollout restart for the named deployment by
