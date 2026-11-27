@@ -1,4 +1,4 @@
-import { REMOTE_RUNTIME } from "@/constants";
+import { PROVIDER_DEPLOYMENT_TYPES, REMOTE_RUNTIME } from "@/constants";
 import type { CatalogModel, CreateModelRequest } from "@/types/api.types";
 import type { DeployFormData } from "../../Shared/types";
 import type { ModelConfig } from "../types";
@@ -29,7 +29,9 @@ export const buildCreateModelPayload = ({
   const params = compactParams(config.params);
 
   return {
-    deployment_type: isRemote ? "remote" : "local",
+    deployment_type: isRemote
+      ? PROVIDER_DEPLOYMENT_TYPES.REMOTE
+      : PROVIDER_DEPLOYMENT_TYPES.LOCAL,
     component_type: model.component_type.id,
     name: formData.name.trim(),
     provider_id: config.inferenceBackendId,

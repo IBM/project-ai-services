@@ -40,6 +40,12 @@ export const REMOTE_RUNTIME = "remote" as const;
 // Runtimes that run on a worker; unavailable to remote-only models.
 export const LOCAL_RUNTIMES: readonly string[] = ["podman", "openshift"];
 
+// Provider deployment types as returned by the models API.
+export const PROVIDER_DEPLOYMENT_TYPES = {
+  LOCAL: "local",
+  REMOTE: "remote",
+} as const;
+
 export const WORKER_RUNTIME_LABELS: Record<
   string,
   { short: string; label: string; description: string }

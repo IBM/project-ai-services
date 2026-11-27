@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import styles from "./RemoteModelConfig.module.scss";
 import { Dropdown, InlineLoading, InlineNotification } from "@carbon/react";
+import { PROVIDER_DEPLOYMENT_TYPES } from "@/constants";
 import { DynamicSchemaFields } from "../../Shared/components/DynamicSchemaFields";
 import {
   useModelDeployOptions,
@@ -41,7 +42,7 @@ export const RemoteModelConfig: React.FC<RemoteModelConfigProps> = ({
   const providers = useMemo(
     () =>
       (deployOptions?.providers ?? []).filter(
-        (p) => p.deployment_type === "remote",
+        (p) => p.deployment_type === PROVIDER_DEPLOYMENT_TYPES.REMOTE,
       ),
     [deployOptions],
   );

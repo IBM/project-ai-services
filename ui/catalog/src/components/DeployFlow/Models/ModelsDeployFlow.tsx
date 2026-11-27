@@ -1,7 +1,12 @@
 import { useReducer, useEffect, useCallback, useState } from "react";
 import { useWorkers } from "@/hooks/useWorkers";
 import { useModels } from "@/hooks/useModels";
-import { DEFAULT_RUNTIME, LOCAL_RUNTIMES, REMOTE_RUNTIME } from "@/constants";
+import {
+  DEFAULT_RUNTIME,
+  LOCAL_RUNTIMES,
+  PROVIDER_DEPLOYMENT_TYPES,
+  REMOTE_RUNTIME,
+} from "@/constants";
 import { createModel } from "@/api/models.api";
 import type {
   ModelConfig,
@@ -129,10 +134,24 @@ export const ModelsDeployFlow = ({
   // Remote has no Configure model step
   const lastStep = isRemote ? STEP_ONE : STEP_TWO;
   const selectedModel = models.find((m) => m.id === state.selectedModelId);
-  const isRemoteOnly =
-    !!selectedModel?.providers.length &&
-    selectedModel.providers.every((p) => p.deployment_type === "remote");
-  const disabledRuntimes = isRemoteOnly ? LOCAL_RUNTIMES : [];
+  // Until the model is known, nothing is ruled out
+  const supportsLocal =
+    !selectedModel ||
+    selectedModel.providers.some(
+      (p) => p.deployment_type === PROVIDER_DEPLOYMENT_TYPES.LOCAL,
+    );
+  const supportsRemote =
+    !selectedModel ||
+    selectedModel.providers.some(
+      (p) => p.deployment_type === PROVIDER_DEPLOYMENT_TYPES.REMOTE,
+    );
+  const isRemoteOnly = !!selectedModel && !supportsLocal && supportsRemote;
+  // A model with no providers can't be registered either way
+  const hasNoProviders = !supportsLocal && !supportsRemote;
+  const disabledRuntimes = [
+    ...(supportsLocal ? [] : LOCAL_RUNTIMES),
+    ...(supportsRemote ? [] : [REMOTE_RUNTIME]),
+  ];
 
   // Prefetch the default runtime's options once a model is picked.
   // Skipped for remote-only models, which never use a local runtime.
@@ -262,6 +281,7 @@ export const ModelsDeployFlow = ({
   // provider settings are still loading and there is nothing to show yet
   const isPrimaryDisabled =
     (state.currentStep === 0 && !state.selectedModelId) ||
+    (state.currentStep > 0 && hasNoProviders) ||
     (isLastStep && isRemote && isRemoteConfigLoading) ||
     (isLastStep && !isRemote && (state.isEditing || !isConfigValid));
 

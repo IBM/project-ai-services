@@ -12,6 +12,7 @@ import {
 } from "@carbon/react";
 import { ProductiveCard } from "@carbon/ibm-products";
 import { Edit, Information, View, ViewOff } from "@carbon/icons-react";
+import { PROVIDER_DEPLOYMENT_TYPES } from "@/constants";
 import type {
   ModelDeployProfile,
   ModelDeployProvider,
@@ -110,7 +111,7 @@ export const ModelsStepTwo: React.FC<ModelsStepTwoProps> = ({
   const providers = useMemo(
     () =>
       (deployOptions?.providers ?? []).filter(
-        (p) => p.deployment_type === "local",
+        (p) => p.deployment_type === PROVIDER_DEPLOYMENT_TYPES.LOCAL,
       ),
     [deployOptions],
   );
