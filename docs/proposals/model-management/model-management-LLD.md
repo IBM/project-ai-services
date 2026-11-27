@@ -360,7 +360,7 @@ The `model` query parameter is the `model_name` registered in the previous step 
 
 The one-time probe at creation only confirms the model was healthy at registration time. The **status sync service** is a background goroutine inside `modelmanager` that continuously re-checks all registered models and connectors and keeps their status in sync with reality — detecting pods that have crashed, remote credentials that have expired, or network connectivity that has been lost since creation.
 
-**Trigger:** runs on a configurable interval (default: **60 seconds**) using a `time.Ticker` started when the Catalog API server boots. It is not a separate process or sidecar — it runs inside the same `modelmanager` package as the rest of the lifecycle logic.
+**Trigger:** runs on a configurable interval (default: **1 minute**) using a `time.Ticker` started when the Catalog API server boots. It is not a separate process or sidecar — it runs inside the same `modelmanager` package as the rest of the lifecycle logic.
 
 **What it checks:**
 
@@ -386,7 +386,7 @@ The `model` query parameter is the model name stored in `components.metadata->>'
 ```go
 // inside modelmanager package, started from catalog server boot
 func (s *SyncService) Start(ctx context.Context) {
-    ticker := time.NewTicker(s.interval) // default 60s, configurable
+    ticker := time.NewTicker(s.interval) // default 1m, configurable
     defer ticker.Stop()
     for {
         select {
@@ -402,7 +402,7 @@ func (s *SyncService) Start(ctx context.Context) {
 
 `syncLocalModels` queries `components` for all managed model rows not in `Deploying`, probes each via LiteLLM `/health`, and writes back any status change. `syncRemoteConnectors` does the same for `connectors` rows with `type = 'models'`.
 
-**Back-off on repeated failures:** if a model has been `Error`/`offline` for more than a configurable threshold (default: **5 consecutive failed probes**), the sync service stops probing it and sets `message = "Health checks suspended after N consecutive failures — manual intervention required"`. It resumes on the next explicit action (e.g. credential update via `PUT /api/v1/models/:id`).
+**Back-off on repeated failures:** if a model has been `Error`/`offline` for more than a configurable threshold (default: **15 consecutive failed probes**, ~15 minutes at the 1 minute interval, so a restarted model has time to load), the sync service stops probing it and sets `message = "Health checks suspended after N consecutive failures — manual intervention required"`. It resumes on the next explicit action (e.g. credential update via `PUT /api/v1/models/:id`).
 
 **No probe storms:** all probes in a single tick run sequentially (not concurrently) to avoid flooding the LiteLLM gateway.
 

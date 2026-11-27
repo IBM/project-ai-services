@@ -24,7 +24,7 @@ import (
 
 const (
 	// DefaultSyncInterval is the default interval for syncing DB with pod status.
-	DefaultSyncInterval = 30 * time.Second
+	DefaultSyncInterval = 5 * time.Minute
 
 	// Resource item types.
 	resourceItemTypeService   = "service"
@@ -51,6 +51,15 @@ type ResourceCounts struct {
 	VolumeNames []string // Names of volumes referenced in pod labels
 }
 
+// ModelSyncer syncs model components and model connectors on every cycle of the SyncService,
+// so models and applications are reconciled together at the same interval.
+type ModelSyncer interface {
+	// Sync runs one model synchronization cycle.
+	Sync(ctx context.Context)
+	// OwnsComponent reports whether the model syncer, not the application sync, tracks the component's status.
+	OwnsComponent(component *models.Component) bool
+}
+
 // SyncService handles periodic synchronization of DB records with actual pod status.
 type SyncService struct {
 	appRepo         dbrepo.ApplicationRepository
@@ -66,6 +75,7 @@ type SyncService struct {
 	isSyncing       bool       // Tracks if a sync is currently running
 	runtimeSyncs    map[runtimeTypes.RuntimeType]RuntimeSync
 	workerRegistry  stream.WorkerRegistry // nil on servers with no remote workers
+	modelSyncer     ModelSyncer           // nil disables model sync
 }
 
 // newRuntimeSync constructs the appropriate RuntimeSync for the configured runtime type.
@@ -89,6 +99,7 @@ func NewSyncService(
 	syncInterval time.Duration,
 	catalogProvider *catalogpkg.CatalogProvider,
 	reg stream.WorkerRegistry,
+	modelSyncer ModelSyncer,
 ) (*SyncService, error) {
 	if syncInterval == 0 {
 		syncInterval = DefaultSyncInterval
@@ -114,6 +125,7 @@ func NewSyncService(
 		stopChan:        make(chan struct{}),
 		runtimeSyncs:    runtimeSyncs,
 		workerRegistry:  reg,
+		modelSyncer:     modelSyncer,
 	}, nil
 }
 
@@ -194,6 +206,17 @@ func (s *SyncService) performSync(ctx context.Context) {
 
 	logger.DebuglnCtx(ctx, "Starting DB-Pod sync cycle")
 
+	s.syncApplications(ctx)
+
+	if s.modelSyncer != nil {
+		s.modelSyncer.Sync(ctx)
+	}
+
+	logger.DebuglnCtx(ctx, "Completed DB-Pod sync cycle")
+}
+
+// syncApplications syncs every application that is in a stable (Running or Error) state.
+func (s *SyncService) syncApplications(ctx context.Context) {
 	// Get all applications with Running or Error status
 	filters := &dbrepo.ApplicationFilters{}
 	applications, err := s.appRepo.GetAll(ctx, filters)
@@ -211,8 +234,6 @@ func (s *SyncService) performSync(ctx context.Context) {
 			}
 		}
 	}
-
-	logger.DebuglnCtx(ctx, "Completed DB-Pod sync cycle")
 }
 
 // syncApplication syncs a single application using bottom-up approach:
@@ -389,6 +410,13 @@ func (s *SyncService) syncAllComponents(ctx context.Context, runtimeSync Runtime
 			component, err := s.componentRepo.GetByID(ctx, dep.DependencyID)
 			if err != nil || component == nil {
 				logger.ErrorfCtx(ctx, "Failed to get component %s for sync check: %v", dep.DependencyID, err)
+				processedComponents[dep.DependencyID] = true
+
+				continue
+			}
+
+			// Model-category components are reported by the model syncer
+			if s.modelSyncer != nil && s.modelSyncer.OwnsComponent(component) {
 				processedComponents[dep.DependencyID] = true
 
 				continue
