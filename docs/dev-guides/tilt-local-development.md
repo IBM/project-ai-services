@@ -163,7 +163,7 @@ The CLI is run with `AI_SERVICES_MOCK_RUNTIME=true`, which swaps in an in-memory
 | Helm (`openshift`) | Install and uninstall are recorded in memory. Each release with a template ID gets one healthy placeholder pod labelled `ai-services.io/template`, so the catalog sync finds it. |
 | Caddy (`podman`) | `PROXY_ROUTE` is served by an in-memory route table. |
 | Models, HTTP tunnel | `DOWNLOAD_MODEL` is a no-op and `HTTP_PROXY` returns an empty `200`. |
-| Routes, CRDs, PVCs, namespaces | OpenShift mock returns empty results. The podman mock returns `unsupported method`, as the real Podman client does. |
+| Routes, CRDs, PVCs, namespaces | OpenShift mock returns empty results, except a CRD lookup by name returns that resource as Ready, so InferenceService waits finish at once. The podman mock returns `unsupported method`, as the real Podman client does. |
 
 Because nothing runs, application services deployed to a mock worker show as running but serve no traffic. The mock is only enabled by the environment variable, so production binaries behave as before.
 
