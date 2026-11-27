@@ -22,6 +22,7 @@ set_log_level(log_level)
 
 import common.db_utils as db
 from common.auth import AuthConfigError, AuthMiddleware, get_verifier, require_role
+from common.auth.openapi import add_bearer_auth_to_openapi
 from common.misc_utils import get_embedding_endpoint, get_reranker_endpoint, set_request_id, create_llm_session
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from common.validation_utils import validate_query_length as _validate_query_length
@@ -96,8 +97,9 @@ app = FastAPI(
     ),
     version="1.0.0",
     openapi_tags=tags_metadata,
-    # The built-in docs pages are served unauthenticated; "/" below serves Swagger behind auth.
-    docs_url=None,
+    # Swagger UI at /docs is public (see AuthMiddleware); "/" below serves it behind auth.
+    docs_url="/docs",
+    swagger_ui_oauth2_redirect_url=None,
     redoc_url=None,
 )
 
@@ -121,6 +123,7 @@ async def add_request_id(request: Request, call_next):
 # Added last, so it is the outermost layer: every request is authenticated (deny by
 # default) before any other middleware or route code runs, and before a body is read.
 app.add_middleware(AuthMiddleware)
+add_bearer_auth_to_openapi(app, service="similarity")
 
 
 @app.get("/", include_in_schema=False, dependencies=[Depends(require_role("admin"))])

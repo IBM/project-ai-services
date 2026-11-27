@@ -17,6 +17,7 @@ from starlette.concurrency import iterate_in_threadpool
 from lingua import Language
 
 from common.auth import AuthConfigError, AuthMiddleware, get_verifier, require_role
+from common.auth.openapi import add_bearer_auth_to_openapi
 from common.misc_utils import set_log_level, get_logger
 from common.lang_utils import detect_language, LanguageCodes, get_max_tokens_map
 
@@ -156,14 +157,15 @@ app = FastAPI(
 - **Multi-language**: Automatic language detection (English, German, French, Italian, Japanese supported)
 - **Performance Metrics**: Detailed timing and token usage tracking
 
-**Authentication**: Every endpoint except `/health`, `/ready` and `/openapi.json` requires a catalog-issued
+**Authentication**: Every endpoint except `/docs`, `/health`, `/ready` and `/openapi.json` requires a catalog-issued
 Bearer token (`Authorization: Bearer <token>`) with a role on the `chat` service. The vLLM API key is a
 deployment secret and is never taken from the request.
 """,
     version="1.0.0",
     openapi_tags=tags_metadata,
-    # The built-in docs pages are served unauthenticated; "/" below serves Swagger behind auth.
-    docs_url=None,
+    # Swagger UI at /docs is public (see AuthMiddleware); "/" below serves it behind auth.
+    docs_url="/docs",
+    swagger_ui_oauth2_redirect_url=None,
     redoc_url=None,
 )
 
@@ -185,6 +187,7 @@ async def add_request_id(request: Request, call_next):
 # Added last, so it is the outermost layer: every request is authenticated (deny by
 # default) before any other middleware or route code runs, and before a body is read.
 app.add_middleware(AuthMiddleware)
+add_bearer_auth_to_openapi(app, service="chat")
 
 
 def _vllm_api_key() -> str | None:

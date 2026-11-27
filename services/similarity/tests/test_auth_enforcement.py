@@ -96,10 +96,10 @@ def test_swagger_root_needs_admin(client, signer):
     assert ok.status_code == 200
 
 
-def test_builtin_docs_are_gone(client, signer):
-    assert client.get("/docs").status_code == 401  # unknown paths are denied, not 404
-    assert client.get("/redoc").status_code == 401
-    assert client.get("/docs", headers=_bearer(signer.token())).status_code == 404
+def test_swagger_docs_are_public_and_redoc_is_gone(client, signer):
+    assert client.get("/docs").status_code == 200  # public so users can browse the API
+    assert client.post("/docs").status_code == 401  # only GET/HEAD are public
+    assert client.get("/redoc").status_code == 401  # unknown paths are denied, not 404
     assert client.get("/redoc", headers=_bearer(signer.token())).status_code == 404
 
 

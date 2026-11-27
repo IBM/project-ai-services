@@ -15,7 +15,9 @@ from common.auth.verifier import InvalidToken, TokenVerifier, get_verifier
 logger = logging.getLogger("auth")
 
 # Exact (path) allow-list, GET/HEAD only. Everything else needs a valid token.
-DEFAULT_PUBLIC_PATHS = frozenset({"/health", "/openapi.json", "/ready"})
+# "/docs" (Swagger UI) and "/openapi.json" are public so users can browse the API without a
+# token; calling the endpoints still requires one.
+DEFAULT_PUBLIC_PATHS = frozenset({"/docs", "/health", "/openapi.json", "/ready"})
 _PUBLIC_METHODS = frozenset({"GET", "HEAD"})
 MAX_TOKEN_LENGTH = 8192
 

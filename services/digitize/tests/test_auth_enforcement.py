@@ -103,10 +103,11 @@ def test_ready_is_public_and_performs_jwks_check(client):
     assert r.json() == {"status": "ready"}
 
 
-def test_swagger_root_needs_admin_and_builtin_docs_are_gone(client, signer):
+def test_swagger_root_needs_admin_docs_are_public_and_redoc_is_gone(client, signer):
     assert client.get("/").status_code == 401
-    assert client.get("/docs").status_code == 401  # unknown paths are denied, not 404
-    assert client.get("/redoc").status_code == 401
+    assert client.get("/docs").status_code == 200  # public so users can browse the API
+    assert client.post("/docs").status_code == 401  # only GET/HEAD are public
+    assert client.get("/redoc").status_code == 401  # unknown paths are denied, not 404
     ok = client.get("/", headers={"Authorization": f"Bearer {signer.token()}"})
     assert ok.status_code == 200
 

@@ -119,10 +119,10 @@ def test_unknown_path_is_denied_before_routing(client):
     assert client.get("/v2/anything").status_code == 401
 
 
-def test_builtin_docs_are_gone(client, signer):
-    assert client.get("/docs").status_code == 401
+def test_swagger_docs_are_public_and_redoc_is_gone(client, signer):
+    assert client.get("/docs").status_code == 200  # public so users can browse the API
+    assert client.post("/docs").status_code == 401  # only GET/HEAD are public
     assert client.get("/redoc").status_code == 401
-    assert client.get("/docs", headers=_bearer(signer.token())).status_code == 404
     assert client.get("/redoc", headers=_bearer(signer.token())).status_code == 404
 
 
