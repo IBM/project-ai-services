@@ -5,7 +5,7 @@ Mounted at /v1/connectors by app.py. Only one connector is supported in this
 release, and a connector that exists blocks a new one whatever its status: POST
 answers 409 and stores nothing. A new connector that cannot be accepted is answered
 with 201 and stored as FAILED, with the reason in its message: its TLS settings are
-invalid (both a certificate and ignore_secure_connection, or neither), or its secrets
+invalid (both a certificate and allow_insecure_connection, or neither), or its secrets
 cannot be encrypted (no usable DB_ENCRYPTION_KEY).
 
 Endpoints:
@@ -72,7 +72,7 @@ logger = get_logger("forecast_connectors")
         "when a connector exists, whatever its status, the call is answered with 409. "
         "When the connector cannot be accepted, the call is answered with 201 and the "
         "connector is stored with the status FAILED and the reason in its message: the "
-        "TLS settings are invalid (a certificate and ignore_secure_connection both set, "
+        "TLS settings are invalid (a certificate and allow_insecure_connection both set, "
         "or neither), or there is no usable DB_ENCRYPTION_KEY."
     ),
     response_description="Connector created",

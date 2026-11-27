@@ -44,7 +44,7 @@ class DBConnectionError(DataLoaderError):
 class DBTLSConfigError(DataLoaderError):
     """Raised when the TLS configuration of the Db2 connection is unusable.
 
-    That is the case when a certificate and ignore_secure_connection are both set or both missing, when the
+    That is the case when a certificate and allow_insecure_connection are both set or both missing, when the
     certificate is not a valid PEM certificate, or when the server's certificate does not verify against it.
     None of these is fixed by trying again.
 

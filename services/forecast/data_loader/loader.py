@@ -122,7 +122,7 @@ def _client_from_config(connection_config: Dict[str, Any]) -> Db2Client:
             connection_config.get("query_timeout", settings.forecast.connector_query_timeout_s)
         ),
         certificate=connection_config.get("certificate"),
-        ignore_secure_connection=_as_bool(connection_config.get("ignore_secure_connection", False)),
+        allow_insecure_connection=_as_bool(connection_config.get("allow_insecure_connection", False)),
     )
 
 

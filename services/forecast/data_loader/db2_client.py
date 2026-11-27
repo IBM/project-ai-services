@@ -86,15 +86,15 @@ class Db2Client:
         connect_timeout: int = settings.forecast.connector_connect_timeout_s,
         query_timeout: int = settings.forecast.connector_query_timeout_s,
         certificate: Optional[str] = None,
-        ignore_secure_connection: bool = False,
+        allow_insecure_connection: bool = False,
         custom_connection: Optional[Any] = None,
     ) -> None:
         """Create a client. The connection is always TLS; the arguments decide how it is checked.
 
-        - ``certificate`` set and ``ignore_secure_connection`` false: the server certificate and
+        - ``certificate`` set and ``allow_insecure_connection`` false: the server certificate and
           host name are verified against the system trust store plus that certificate (PEM content
           from the connector's connection details).
-        - ``certificate`` empty and ``ignore_secure_connection`` true: no certificate is used at
+        - ``certificate`` empty and ``allow_insecure_connection`` true: no certificate is used at
           all. Nothing is loaded, not even the system trust store, and Mapepire's
           ``ignoreUnauthorized`` is set.
         - Both, or neither, is a configuration error (DBTLSConfigError, raised on connect). The API
@@ -110,31 +110,31 @@ class Db2Client:
         self.connect_timeout = connect_timeout
         self.query_timeout = query_timeout
         self.certificate = certificate or None
-        self.ignore_secure_connection = bool(ignore_secure_connection)
+        self.allow_insecure_connection = bool(allow_insecure_connection)
         self._conn = custom_connection
         self._server: Optional[Any] = None
 
     @property
     def _skip_verification(self) -> bool:
         """True when the connector asked not to verify the server."""
-        return self.ignore_secure_connection
+        return self.allow_insecure_connection
 
     def _build_ssl_context(self) -> ssl.SSLContext:
         """Return the TLS context: the system trust store plus the certificate, or no certificates.
 
-        With ignore_secure_connection the context has nothing loaded and does no verification.
+        With allow_insecure_connection the context has nothing loaded and does no verification.
         With a certificate, DBTLSConfigError is raised when it is not valid PEM. The message
         never shows its content. Both set, or neither, is a DBTLSConfigError too.
         """
         # The API stores such a connector as FAILED, so only an old or hand-written one gets here.
-        if self.ignore_secure_connection == (self.certificate is not None):
+        if self.allow_insecure_connection == (self.certificate is not None):
             raise DBTLSConfigError(
-                "The connector must have either a certificate or ignore_secure_connection, not both and not neither"
+                "The connector must have either a certificate or allow_insecure_connection, not both and not neither"
             )
         if self._skip_verification:
             logger.warning(
                 "INSECURE Db2 connection to %s:%s: no certificate is used and the server certificate "
-                "is not verified because the connector sets ignore_secure_connection. The traffic is "
+                "is not verified because the connector sets allow_insecure_connection. The traffic is "
                 "encrypted but the server is not authenticated, so it can be impersonated. Add a "
                 "certificate to the connector to verify it",
                 self.host,
@@ -245,7 +245,7 @@ class Db2Client:
                 # (wrong certificate, host name not in it, expired). Retrying cannot change that.
                 raise DBTLSConfigError(
                     f"The certificate of Db2 host '{self.host}' was not accepted - {exc}. "
-                    "Check the connector's certificate and host, or use ignore_secure_connection."
+                    "Check the connector's certificate and host, or use allow_insecure_connection."
                 ) from exc
             if any(kw in err_str for kw in ("password", "auth", "credentials", "not authorized", "user id", "unauthorized")):
                 raise DBAuthError(

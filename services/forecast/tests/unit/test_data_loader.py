@@ -586,7 +586,7 @@ def test_get_connection_treats_a_certificate_failure_as_permanent_whatever_wraps
 @pytest.mark.usefixtures("no_certificate_probe")
 def test_get_connection_passes_connection_settings_to_mapepire():
     """Host, port and credentials reach the Mapepire daemon description."""
-    client = Db2Client("host", "db", "user", "secret", port=9999, ignore_secure_connection=True)
+    client = Db2Client("host", "db", "user", "secret", port=9999, allow_insecure_connection=True)
     with patch("mapepire_python.DaemonServer") as daemon, patch("mapepire_python.connect") as connect:
         assert client._get_connection() is connect.return_value
     daemon.assert_called_once_with(
@@ -691,10 +691,10 @@ def test_a_certificate_verifies_the_server_and_does_not_set_ignore_unauthorized(
 
 
 @pytest.mark.parametrize("certificate", [None, ""])
-def test_ignore_secure_connection_sets_ignore_unauthorized_and_uses_no_certificate(certificate, caplog):
-    """ignore_secure_connection without a certificate: Mapepire's skip switch is on, nothing is loaded
+def test_allow_insecure_connection_sets_ignore_unauthorized_and_uses_no_certificate(certificate, caplog):
+    """allow_insecure_connection without a certificate: Mapepire's skip switch is on, nothing is loaded
     (not even the system store), and a warning is logged."""
-    client = Db2Client("host", "db", "user", "secret", certificate=certificate, ignore_secure_connection=True)
+    client = Db2Client("host", "db", "user", "secret", certificate=certificate, allow_insecure_connection=True)
     assert client.certificate is None
     with patch("mapepire_python.DaemonServer") as daemon, patch("mapepire_python.connect"):
         with caplog.at_level("WARNING"):
@@ -703,7 +703,7 @@ def test_ignore_secure_connection_sets_ignore_unauthorized_and_uses_no_certifica
     context = daemon.return_value.ssl_context
     assert context.verify_mode == ssl.CERT_NONE and context.check_hostname is False
     assert context.cert_store_stats() == {"x509": 0, "crl": 0, "x509_ca": 0}
-    assert "INSECURE" in caplog.text and "ignore_secure_connection" in caplog.text
+    assert "INSECURE" in caplog.text and "allow_insecure_connection" in caplog.text
     assert "secret" not in caplog.text
 
 
@@ -718,7 +718,7 @@ def test_ignore_secure_connection_sets_ignore_unauthorized_and_uses_no_certifica
 def test_an_invalid_combination_is_refused_and_never_connects(certificate, ignore, message, ca_pem):
     """Neither mode (or both) is a permanent configuration error: nothing silently falls back."""
     certificate = ca_pem if certificate == "PEM" else certificate
-    client = Db2Client("host", "db", "user", "secret", certificate=certificate, ignore_secure_connection=ignore)
+    client = Db2Client("host", "db", "user", "secret", certificate=certificate, allow_insecure_connection=ignore)
     with patch("mapepire_python.DaemonServer"), patch("mapepire_python.connect") as connect:
         with pytest.raises(DBTLSConfigError, match=message) as excinfo:
             client._get_connection()
@@ -731,27 +731,27 @@ def test_the_server_certificate_is_never_fetched_or_trusted(ca_pem):
     """Whatever the mode, the client never connects just to read the server's own certificate."""
     assert not hasattr(Db2Client, "_pin_server_certificate")
     with patch("socket.create_connection") as sock:
-        Db2Client("host", "db", "user", "secret", ignore_secure_connection=True)._build_ssl_context()
+        Db2Client("host", "db", "user", "secret", allow_insecure_connection=True)._build_ssl_context()
         Db2Client("host", "db", "user", "secret", certificate=ca_pem)._build_ssl_context()
     sock.assert_not_called()
 
 
 def test_the_old_flags_are_not_client_options():
-    """allow_insecure_connection and ignore_unauthorized do not exist: ignore_secure_connection replaces them."""
+    """ignore_secure_connection and ignore_unauthorized do not exist: allow_insecure_connection replaces them."""
     import inspect
 
     parameters = inspect.signature(Db2Client.__init__).parameters
-    assert "allow_insecure_connection" not in parameters and "ignore_unauthorized" not in parameters
-    assert "ignore_secure_connection" in parameters
+    assert "ignore_secure_connection" not in parameters and "ignore_unauthorized" not in parameters
+    assert "allow_insecure_connection" in parameters
 
 
 def test_the_loader_passes_the_certificate_and_the_flag_to_the_client(ca_pem):
     """The decrypted connection details decide the TLS mode; a stored string flag is parsed."""
     base = {"host": "h", "database": "d", "username": "u", "password": "p"}
-    insecure = loader_module._client_from_config({**base, "ignore_secure_connection": True})
-    insecure_str = loader_module._client_from_config({**base, "ignore_secure_connection": "true"})
+    insecure = loader_module._client_from_config({**base, "allow_insecure_connection": True})
+    insecure_str = loader_module._client_from_config({**base, "allow_insecure_connection": "true"})
     verified = loader_module._client_from_config(
-        {**base, "certificate": ca_pem, "ignore_secure_connection": False}
+        {**base, "certificate": ca_pem, "allow_insecure_connection": False}
     )
     assert insecure.certificate is None and insecure._skip_verification is True
     assert insecure_str._skip_verification is True
@@ -770,7 +770,7 @@ def test_the_stored_flag_is_parsed_so_that_only_a_clear_yes_skips_verification(v
     """A flag stored as text is parsed; anything that is not a clear yes keeps the server verified."""
     assert loader_module._as_bool(value) is expected
     client = loader_module._client_from_config(
-        {"host": "h", "database": "d", "username": "u", "password": "p", "ignore_secure_connection": value}
+        {"host": "h", "database": "d", "username": "u", "password": "p", "allow_insecure_connection": value}
     )
     assert client._skip_verification is expected
 
@@ -862,10 +862,10 @@ def test_a_certificate_for_another_host_is_refused_by_a_real_handshake(tls_serve
     assert "mismatch" in excinfo.value.verify_message.lower()
 
 
-def test_ignore_secure_connection_accepts_any_certificate_in_a_real_handshake(tls_server, monkeypatch):
+def test_allow_insecure_connection_accepts_any_certificate_in_a_real_handshake(tls_server, monkeypatch):
     """With the flag the handshake succeeds although the certificate is unknown and names another host."""
     port, _ = tls_server(san_ip="127.0.0.2")
-    _open_websocket(Db2Client("127.0.0.1", "db", "user", "secret", ignore_secure_connection=True), port, monkeypatch)
+    _open_websocket(Db2Client("127.0.0.1", "db", "user", "secret", allow_insecure_connection=True), port, monkeypatch)
 
 
 def test_a_tls_configuration_error_makes_the_orchestrator_stop_retrying(encryption_key, tmp_path):
@@ -875,7 +875,7 @@ def test_a_tls_configuration_error_makes_the_orchestrator_stop_retrying(encrypti
 
     details = encrypt_secrets({"host": "h", "database": "d", "username": "u", "password": "secret"})
     with patch("mapepire_python.connect") as connect:
-        with pytest.raises(PermanentFailure, match="ignore_secure_connection") as excinfo:
+        with pytest.raises(PermanentFailure, match="allow_insecure_connection") as excinfo:
             load_training_data(
                 table="TEST.ORDERS", columns=["ID"], output_path=tmp_path / "o.parquet",
                 connector_id="conn-9", connection_details=details,
