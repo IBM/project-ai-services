@@ -148,6 +148,8 @@ func WaitForModelDownload(ctx context.Context, model, containerID string) error 
 
 	for {
 		if err := ctx.Err(); err != nil {
+			stopDownloadContainer(runtimeClient, containerID)
+
 			return fmt.Errorf("model download wait cancelled: %w", err)
 		}
 
@@ -164,10 +166,19 @@ func WaitForModelDownload(ctx context.Context, model, containerID string) error 
 		// Container is still running — wait before polling again.
 		select {
 		case <-ctx.Done():
+			stopDownloadContainer(runtimeClient, containerID)
+
 			return fmt.Errorf("model download wait cancelled: %w", ctx.Err())
 		case <-time.After(modelDownloadPollInterval):
 		}
 	}
+}
+
+// stopDownloadContainer stops a download container whose wait was cancelled (e.g. the
+// deployment was deleted mid-download). The container is created with Remove=true, so it
+// is removed automatically once stopped.
+func stopDownloadContainer(runtimeClient *podman.PodmanClient, containerID string) {
+	_ = containers.Stop(runtimeClient.Context, containerID, nil)
 }
 
 // checkDownloadExitCode removes the stopped container and returns an error if

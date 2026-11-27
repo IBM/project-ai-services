@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
@@ -88,14 +89,37 @@ func downloadModelsRemote(ctx context.Context, rt *remoteruntime.RemoteRuntime, 
 		started = append(started, modelContainer{model: modelName, containerID: containerID})
 	}
 
+	// Wait on all downloads concurrently under one cancellable context: if the caller
+	// cancels (e.g. the deployment is deleted) or any download fails, every in-flight
+	// wait is cancelled so the worker stops the remaining download containers.
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		wg       sync.WaitGroup
+		once     sync.Once
+		firstErr error
+	)
+
 	for _, mc := range started {
-		if _, err := rt.Send(ctx, workerpb.CommandType_COMMAND_TYPE_CHECK_MODEL_DOWNLOAD, payload.CheckModelDownload{
-			Model:       mc.model,
-			ContainerID: mc.containerID,
-		}); err != nil {
-			return fmt.Errorf("model download failed for %s: %w", mc.model, err)
-		}
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			if _, err := rt.Send(waitCtx, workerpb.CommandType_COMMAND_TYPE_CHECK_MODEL_DOWNLOAD, payload.CheckModelDownload{
+				Model:       mc.model,
+				ContainerID: mc.containerID,
+			}); err != nil {
+				once.Do(func() {
+					firstErr = fmt.Errorf("model download failed for %s: %w", mc.model, err)
+					cancel()
+				})
+			}
+		}()
 	}
 
-	return nil
+	wg.Wait()
+
+	return firstErr
 }

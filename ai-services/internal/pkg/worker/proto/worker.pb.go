@@ -59,7 +59,10 @@ const (
 	// HTTP proxy tunnel through the gRPC stream.
 	// The control plane sends an HTTP request; the worker executes it locally
 	// against a pod endpoint and returns the response.
-	CommandType_COMMAND_TYPE_HTTP_PROXY            CommandType = 26
+	CommandType_COMMAND_TYPE_HTTP_PROXY CommandType = 26
+	// Start downloading a model on the worker.
+	// The worker launches the tools container and returns the container ID
+	// immediately without waiting for the download to finish.
 	CommandType_COMMAND_TYPE_DOWNLOAD_MODEL        CommandType = 27
 	CommandType_COMMAND_TYPE_FIND_FREE_SPYRE_CARDS CommandType = 28
 	CommandType_COMMAND_TYPE_GET_BASE_DIR          CommandType = 29
@@ -552,6 +555,8 @@ const file_worker_proto_rawDesc = "" +
 	"\x1aCOMMAND_TYPE_UPDATE_SECRET\x10$\x12\x17\n" +
 	"\x13COMMAND_TYPE_CANCEL\x10%\x12\x1f\n" +
 	"\x1bCOMMAND_TYPE_DELETE_SECRETS\x10&2\x97\x01\n" +
+	"\x19COMMAND_TYPE_GET_BASE_DIR\x10\x1d\x12%\n" +
+	"!COMMAND_TYPE_CHECK_MODEL_DOWNLOAD\x10'2\x97\x01\n" +
 	"\rWorkerGateway\x12C\n" +
 	"\bRegister\x12\x1a.worker.v1.RegisterRequest\x1a\x1b.worker.v1.RegisterResponse\x12A\n" +
 	"\rCommandStream\x12\x18.worker.v1.CommandResult\x1a\x12.worker.v1.Command(\x010\x01BFZDgithub.com/project-ai-services/ai-services/internal/pkg/worker/protob\x06proto3"

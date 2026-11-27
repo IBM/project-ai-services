@@ -11,7 +11,6 @@ require (
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/huh v0.7.0
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/containers/podman/v5 v5.8.11
 	github.com/creack/pty v1.1.24
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-resty/resty/v2 v2.17.2
@@ -100,7 +99,6 @@ require (
 	github.com/containerd/platforms v1.0.0-rc.5 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.19.1 // indirect
 	github.com/containerd/typeurl/v2 v2.3.0 // indirect
-	github.com/containers/buildah v1.43.5 // indirect
 	github.com/containers/libtrust v0.0.0-20230121012942-c1716e8a8d01 // indirect
 	github.com/containers/ocicrypt v1.3.2 // indirect
 	github.com/containers/psgo v1.10.0 // indirect
@@ -111,7 +109,6 @@ require (
 	github.com/disiqueira/gotree/v3 v3.0.2 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/distribution v2.8.3+incompatible // indirect
-	github.com/docker/docker v28.5.1+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.10 // indirect
 	github.com/docker/go-connections v0.8.2 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
@@ -228,7 +225,6 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/monochromegane/go-gitignore v0.0.0-20200626010858-205db1a8cc00 // indirect
-	github.com/morikuni/aec v1.1.0 // indirect
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
@@ -237,7 +233,6 @@ require (
 	github.com/opencontainers/cgroups v0.1.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
-	github.com/opencontainers/runc v1.5.2 // indirect
 	github.com/opencontainers/runtime-tools v0.9.1-0.20261017090856-bd3b0bd00f44 // indirect
 	github.com/opencontainers/selinux v1.15.1 // indirect
 	github.com/openshift/imagebuilder v1.2.22 // indirect

@@ -29,7 +29,10 @@ func handleMock(rt runtime.Runtime, cmd *workerpb.Command) (data []byte, handled
 
 	switch cmd.GetType() {
 	case workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL:
-		return nil, true, nil
+		// The control plane expects a container ID back; there is no real container.
+		data, err := marshalOr("mock-model-download", nil)
+
+		return data, true, err
 
 	case workerpb.CommandType_COMMAND_TYPE_FIND_FREE_SPYRE_CARDS:
 		data, err := marshalOr(mc.FreeSpyreCards(), nil)
