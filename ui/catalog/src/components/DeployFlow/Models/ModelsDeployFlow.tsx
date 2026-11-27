@@ -264,6 +264,9 @@ export const ModelsDeployFlow = ({
     (state.currentStep === 0 && !state.selectedModelId) ||
     (isLastStep && !isRemote && (state.isEditing || !isConfigValid));
 
+  // Going back would discard the unsaved draft in the Configure model card
+  const isBackDisabled = state.currentStep === STEP_TWO && state.isEditing;
+
   const stepsWithCompletion = [
     { ...STEPS[0], complete: !!state.selectedModelId },
     ...STEPS.slice(1, lastStep + 1),
@@ -279,6 +282,7 @@ export const ModelsDeployFlow = ({
       isLastStep={isLastStep}
       isDeploying={state.isDeploying}
       isPrimaryDisabled={isPrimaryDisabled}
+      isBackDisabled={isBackDisabled}
       onBack={handleBack}
       // An invalid name is passed as empty to trigger the shared name error
       onNext={() => {

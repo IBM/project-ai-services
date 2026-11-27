@@ -24,6 +24,8 @@ interface DeployTearsheetShellProps {
   isLastStep: boolean;
   isDeploying: boolean;
   isPrimaryDisabled: boolean;
+  // Disables Back, e.g. while an unsaved draft would be lost
+  isBackDisabled?: boolean;
   onBack: () => void;
   onNext: () => void;
   onSubmit: () => void;
@@ -48,6 +50,7 @@ export const DeployTearsheetShell = ({
   isLastStep,
   isDeploying,
   isPrimaryDisabled,
+  isBackDisabled = false,
   onBack,
   onNext,
   onSubmit,
@@ -73,7 +76,7 @@ export const DeployTearsheetShell = ({
       label: "Back",
       kind: "secondary" as const,
       onClick: onBack,
-      disabled: currentStep === 0 || isDeploying,
+      disabled: currentStep === 0 || isDeploying || isBackDisabled,
     },
     {
       label: isLastStep
