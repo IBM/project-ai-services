@@ -82,6 +82,11 @@ const (
 	CommandType_COMMAND_TYPE_CANCEL CommandType = 37
 	// Delete all Kubernetes secrets matching a label selector on an OpenShift worker.
 	CommandType_COMMAND_TYPE_DELETE_SECRETS CommandType = 38
+	// Wait for a previously-started model download container to exit.
+	// The control plane sends the container ID returned by COMMAND_TYPE_DOWNLOAD_MODEL;
+	// the worker blocks until the container exits and fails the command if the
+	// exit code was non-zero.
+	CommandType_COMMAND_TYPE_CHECK_MODEL_DOWNLOAD CommandType = 39
 )
 
 // Enum value maps for CommandType.
@@ -125,6 +130,7 @@ var (
 		36: "COMMAND_TYPE_UPDATE_SECRET",
 		37: "COMMAND_TYPE_CANCEL",
 		38: "COMMAND_TYPE_DELETE_SECRETS",
+		39: "COMMAND_TYPE_CHECK_MODEL_DOWNLOAD",
 	}
 	CommandType_value = map[string]int32{
 		"COMMAND_TYPE_UNSPECIFIED":           0,
@@ -165,6 +171,7 @@ var (
 		"COMMAND_TYPE_UPDATE_SECRET":         36,
 		"COMMAND_TYPE_CANCEL":                37,
 		"COMMAND_TYPE_DELETE_SECRETS":        38,
+		"COMMAND_TYPE_CHECK_MODEL_DOWNLOAD":  39,
 	}
 )
 
@@ -505,7 +512,7 @@ const file_worker_proto_rawDesc = "" +
 	"\x05error\x18\x04 \x01(\tR\x05error\x12!\n" +
 	"\fis_heartbeat\x18\x05 \x01(\bR\visHeartbeat\x12\x1f\n" +
 	"\vworker_name\x18\x06 \x01(\tR\n" +
-	"workerName*\xb4\t\n" +
+	"workerName*\xdb\t\n" +
 	"\vCommandType\x12\x1c\n" +
 	"\x18COMMAND_TYPE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18COMMAND_TYPE_LIST_IMAGES\x10\x01\x12\x1b\n" +
@@ -545,7 +552,8 @@ const file_worker_proto_rawDesc = "" +
 	"\x1dCOMMAND_TYPE_DELETE_NAMESPACE\x10#\x12\x1e\n" +
 	"\x1aCOMMAND_TYPE_UPDATE_SECRET\x10$\x12\x17\n" +
 	"\x13COMMAND_TYPE_CANCEL\x10%\x12\x1f\n" +
-	"\x1bCOMMAND_TYPE_DELETE_SECRETS\x10&2\x97\x01\n" +
+	"\x1bCOMMAND_TYPE_DELETE_SECRETS\x10&\x12%\n" +
+	"!COMMAND_TYPE_CHECK_MODEL_DOWNLOAD\x10'2\x97\x01\n" +
 	"\rWorkerGateway\x12C\n" +
 	"\bRegister\x12\x1a.worker.v1.RegisterRequest\x1a\x1b.worker.v1.RegisterResponse\x12A\n" +
 	"\rCommandStream\x12\x18.worker.v1.CommandResult\x1a\x12.worker.v1.Command(\x010\x01BFZDgithub.com/project-ai-services/ai-services/internal/pkg/worker/protob\x06proto3"

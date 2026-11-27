@@ -66,6 +66,14 @@ type DownloadModel struct {
 	Model string `json:"model"`
 }
 
+// CheckModelDownload is the wire payload for COMMAND_TYPE_CHECK_MODEL_DOWNLOAD.
+// ContainerID is the ID returned by the COMMAND_TYPE_DOWNLOAD_MODEL command.
+// The worker polls the container until it exits and returns an error if the
+// exit code was non-zero.
+type CheckModelDownload struct {
+	ContainerID string `json:"container_id"`
+}
+
 // ─── Network ──────────────────────────────────────────────────────────────────
 
 type ListRoutes struct {

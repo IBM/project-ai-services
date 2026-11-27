@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/accelerator/spyre"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -486,46 +487,51 @@ func (pc *PodmanClient) ContainerExists(ctx context.Context, nameOrID string) (b
 	return containers.Exists(podCtx, nameOrID, nil)
 }
 
-// RunContainerWithSpec creates, starts, waits for, and removes a container with the given spec.
-// ctx is used to interrupt the wait: if cancelled, the container is stopped and ctx.Err() is
-// returned so callers can distinguish a cancellation from a real container failure.
-// pc.Context (the Podman connection context) is still used for all Podman API calls.
-// Returns the exit code of the container.
-func (pc *PodmanClient) RunContainerWithSpec(ctx context.Context, s *specgen.SpecGenerator) (int32, error) {
-	// Create container
+// StartContainerWithSpec creates and starts a container from the given spec,
+// returning the container ID immediately without waiting for the container to
+// exit. The caller polls the container state separately (e.g. via containers.Inspect).
+func (pc *PodmanClient) StartContainerWithSpec(ctx context.Context, s *specgen.SpecGenerator) (string, error) {
 	createResponse, err := containers.CreateWithSpec(pc.Context, s, nil)
 	if err != nil {
-		return -1, fmt.Errorf("failed to create container: %w", err)
+		return "", fmt.Errorf("failed to create container: %w", err)
 	}
 
 	containerID := createResponse.ID
-
-	// Start container
 	if err := containers.Start(pc.Context, containerID, nil); err != nil {
-		return -1, fmt.Errorf("failed to start container: %w", err)
+		// Best-effort remove to avoid an orphaned created-but-not-started container.
+		_, _ = containers.Remove(pc.Context, containerID, nil)
+
+		return "", fmt.Errorf("failed to start container: %w", err)
 	}
 
-	// Wait in a goroutine so we can react to ctx cancellation while the container runs.
-	type waitResult struct {
-		exitCode int32
-		err      error
-	}
-	done := make(chan waitResult, 1)
+	return containerID, nil
+}
 
-	go func() {
-		code, err := containers.Wait(pc.Context, containerID, nil)
-		done <- waitResult{code, err}
-	}()
+// WaitForContainerExit polls the container until it has exited, removes it, and returns an
+// error if the exit code was non-zero.
+//
+// If ctx is cancelled or its deadline passes, the container is force-removed (which stops it)
+// and an error wrapping ctx.Err() is returned, so callers can tell it from a container failure.
+func (pc *PodmanClient) WaitForContainerExit(ctx context.Context, containerID string, pollInterval time.Duration) error {
+	for {
+		data, err := containers.Inspect(pc.Context, containerID, nil)
+		if err != nil {
+			return fmt.Errorf("failed to inspect container %s: %w", containerID, err)
+		}
 
-	select {
-	case <-ctx.Done():
-		// Caller cancelled (e.g. mid-deployment delete) — stop the container so it is
-		// cleaned up immediately. The spec has Remove=true so it auto-removes on stop.
-		_ = containers.Stop(pc.Context, containerID, nil)
+		if hasExited(data.State) {
+			_, _ = containers.Remove(pc.Context, containerID, nil)
 
-		return -1, ctx.Err()
-	case r := <-done:
-		return r.exitCode, r.err
+			return exitCodeError(containerID, data.State)
+		}
+
+		select {
+		case <-ctx.Done():
+			_, _ = containers.Remove(pc.Context, containerID, new(containers.RemoveOptions).WithForce(true))
+
+			return fmt.Errorf("wait for container %s aborted: %w", containerID, ctx.Err())
+		case <-time.After(pollInterval):
+		}
 	}
 }
 
@@ -951,4 +957,29 @@ func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string,
 // "<podName>-<containerName>" (the naming convention Podman uses for pod members).
 func (pc *PodmanClient) ExecInContainerWithCmd(_ context.Context, podName, containerName string, cmd []string) (string, error) {
 	return pc.ExecInContainerWithOutput(podName+"-"+containerName, cmd)
+}
+
+// hasExited reports whether the container has really exited. Only then is ExitCode valid:
+// other states (running, stopping, removing, paused, created) report 0 and must not be
+// mistaken for success.
+func hasExited(state *define.InspectContainerState) bool {
+	return state.Status == define.ContainerStateExited.String() || state.Status == define.ContainerStateStopped.String()
+}
+
+// exitCodeError returns nil for a zero exit code, otherwise an error with the exit code and
+// any OOM or container error details.
+func exitCodeError(containerID string, state *define.InspectContainerState) error {
+	if state.ExitCode == 0 {
+		return nil
+	}
+
+	msg := fmt.Sprintf("container %s exited with code %d", containerID, state.ExitCode)
+	if state.OOMKilled {
+		msg += " (OOM killed)"
+	}
+	if state.Error != "" {
+		msg += ": " + state.Error
+	}
+
+	return errors.New(msg)
 }
