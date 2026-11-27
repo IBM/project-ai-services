@@ -167,11 +167,12 @@ function matchesPattern(pattern: string, value: string): boolean {
   }
 }
 
-// Lowercases the first letter mid-sentence, keeping acronyms like "API"
+// Lowercases the first letter mid-sentence, only when the first word is a
+// plain capitalised word; keeps acronyms and mixed words like "API" or "S3"
 function lowerFirst(label: string): string {
-  return /^[A-Z][A-Z]/.test(label)
-    ? label
-    : label.charAt(0).toLowerCase() + label.slice(1);
+  return /^[A-Z][a-z]*(\s|$)/.test(label)
+    ? label.charAt(0).toLowerCase() + label.slice(1)
+    : label;
 }
 
 // Validates a value against a parsed field's validation rules, returning an error string or null
