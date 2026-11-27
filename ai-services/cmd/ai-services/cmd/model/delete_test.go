@@ -7,14 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 )
-
-func TestDeleteMessage(t *testing.T) {
-	assert.Equal(t, "Model 'prod-watsonx' deleted.", deleteMessage("prod-watsonx", nil))
-	assert.Contains(t, deleteMessage("granite-llm", &models.DeleteModelResponse{ID: "id-1"}), "Undeploy of model 'granite-llm' initiated")
-}
 
 func TestDeleteError(t *testing.T) {
 	httpErr := func(code int) error {

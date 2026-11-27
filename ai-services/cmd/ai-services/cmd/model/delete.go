@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
@@ -71,24 +71,48 @@ func runDelete(ctx context.Context, name string, autoYes bool) error {
 		}
 	}
 
+	logger.Infof("Deleting model %s...\n", item.Name)
 	resp, err := modelClient.DeleteModel(ctx, item.ID)
 	if err != nil {
 		return deleteError(item.Name, err)
 	}
 
-	logger.Infoln(deleteMessage(item.Name, resp))
-
-	return nil
-}
-
-// deleteMessage describes the outcome of a delete. A nil response means a remote model that
-// was removed synchronously; otherwise a local model whose undeploy continues in the background.
-func deleteMessage(name string, resp *models.DeleteModelResponse) string {
+	// A nil response means a remote model that was removed synchronously.
 	if resp == nil {
-		return fmt.Sprintf("Model '%s' deleted.", name)
+		logger.Infof("Model %s deleted successfully.\n", item.Name)
+
+		return nil
 	}
 
-	return fmt.Sprintf("Undeploy of model '%s' initiated. It is removed in the background.", name)
+	// A local model is undeployed in the background, so poll until it is gone.
+	return waitForModelDeletion(ctx, modelClient, item.ID, item.Name)
+}
+
+// waitForModelDeletion shows a spinner, updated with the model status, until the model is gone.
+func waitForModelDeletion(ctx context.Context, modelClient *catalogClient.ModelClient, id, name string) error {
+	waitMsg := fmt.Sprintf("Waiting for model '%s' to be deleted...", name)
+	s := spinner.New(waitMsg)
+	s.Start(ctx)
+
+	err := cliUtils.WaitForDeletion(ctx, "Model", func(ctx context.Context) error {
+		m, err := modelClient.GetModel(ctx, id)
+		if err != nil {
+			return err
+		}
+
+		s.UpdateMessage(fmt.Sprintf("%s (status: %s)", waitMsg, m.Status))
+
+		return nil
+	})
+	if err != nil {
+		s.Fail("Failed to verify model deletion")
+
+		return fmt.Errorf("failed to verify model deletion: %w", err)
+	}
+
+	s.Stop(fmt.Sprintf("Model '%s' deleted successfully", name))
+
+	return nil
 }
 
 // deleteError turns a delete API failure into a message for the user.
