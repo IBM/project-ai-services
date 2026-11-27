@@ -11,6 +11,7 @@ import (
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -234,14 +235,12 @@ func (e *ModelExecutor) setMaxModelLen(ctx context.Context, plan *types.RemotePl
 	return nil
 }
 
-// setBatchSizeParam parses maxBatchSize from the parameter map (defaulting to 32) and populates DB params metadata.
+// setBatchSizeParam parses maxBatchSize from the parameter map (defaulting to 32, also when it is
+// not a whole number) and populates DB params metadata.
 func setBatchSizeParam(plan *types.RemotePlan) {
 	maxBatchSize := 32
-	switch v := plan.Req.Params[catalogconstants.ParamMaxBatchSize].(type) {
-	case int:
-		maxBatchSize = v
-	case float64:
-		maxBatchSize = int(v)
+	if n, ok := catalogutils.WholeNumber(plan.Req.Params[catalogconstants.ParamMaxBatchSize]); ok {
+		maxBatchSize = n
 	}
 
 	plan.MetadataParams()[catalogconstants.ParamMaxBatchSize] = maxBatchSize

@@ -607,6 +607,14 @@ func TestRemoteModelValues(t *testing.T) {
 		assert.Equal(t, map[string]any{"model": "ibm/granite", "maxModelLen": 131072, "maxBatchSize": 64}, llm)
 	})
 
+	t.Run("a stored number that is not whole is kept, not truncated", func(t *testing.T) {
+		llm := remoteModelValues(
+			apimodels.Component{ComponentType: "llm", Model: "ibm/granite"},
+			connector(map[string]any{"maxBatchSize": 32.5}))
+
+		assert.Equal(t, map[string]any{"model": "ibm/granite", "maxBatchSize": 32.5}, llm)
+	})
+
 	t.Run("only the params the connector holds are set", func(t *testing.T) {
 		embedding := remoteModelValues(
 			apimodels.Component{ComponentType: "embedding", Model: "bge"},
@@ -783,6 +791,24 @@ func TestModelProfile(t *testing.T) {
 	})
 }
 
+// processWithProfile resolves the profile of rc like processService does, then processes it.
+func processWithProfile(
+	t *testing.T,
+	planner *DeploymentPlanner,
+	rc resolvedComponent,
+	catalogID string,
+	plan *DeploymentPlan,
+) (string, error) {
+	t.Helper()
+
+	profile, err := planner.modelProfile(catalogID, rc)
+	require.NoError(t, err)
+
+	rc.req.Profile = profile
+
+	return planner.processComponent(t.Context(), rc, catalogID, plan)
+}
+
 func TestProcessComponentProfile(t *testing.T) {
 	llm := apimodels.Component{
 		ComponentType: "llm", ProviderID: "vllm-spyre", Version: "1.0", Model: "ibm-granite/granite-3.3-8b-instruct",
@@ -792,7 +818,7 @@ func TestProcessComponentProfile(t *testing.T) {
 		fake := &fakeModelManager{}
 		planner := newTestPlanner(t, fake, nil)
 
-		_, err := planner.processComponent(t.Context(), resolvedComponent{req: llm}, "extract", newTestPlan("alice"))
+		_, err := processWithProfile(t, planner, resolvedComponent{req: llm}, "extract", newTestPlan("alice"))
 
 		require.NoError(t, err)
 		require.NotNil(t, fake.gotPlanReq)
@@ -803,7 +829,7 @@ func TestProcessComponentProfile(t *testing.T) {
 		fake := &fakeModelManager{}
 		planner := newTestPlanner(t, fake, nil)
 
-		_, err := planner.processComponent(t.Context(), resolvedComponent{req: llm}, "chat", newTestPlan("alice"))
+		_, err := processWithProfile(t, planner, resolvedComponent{req: llm}, "chat", newTestPlan("alice"))
 
 		require.NoError(t, err)
 		require.NotNil(t, fake.gotPlanReq)
@@ -814,10 +840,10 @@ func TestProcessComponentProfile(t *testing.T) {
 		planner := newTestPlanner(t, &fakeModelManager{}, nil)
 		plan := newTestPlan("alice")
 
-		a, err := planner.processComponent(t.Context(), resolvedComponent{req: llm}, "digitize", plan)
+		a, err := processWithProfile(t, planner, resolvedComponent{req: llm}, "digitize", plan)
 		require.NoError(t, err)
 
-		b, err := planner.processComponent(t.Context(), resolvedComponent{req: llm}, "extract", plan)
+		b, err := processWithProfile(t, planner, resolvedComponent{req: llm}, "extract", plan)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, a, b)
@@ -828,10 +854,10 @@ func TestProcessComponentProfile(t *testing.T) {
 		planner := newTestPlanner(t, &fakeModelManager{}, nil)
 		plan := newTestPlan("alice")
 
-		a, err := planner.processComponent(t.Context(), resolvedComponent{req: llm}, "digitize", plan)
+		a, err := processWithProfile(t, planner, resolvedComponent{req: llm}, "digitize", plan)
 		require.NoError(t, err)
 
-		b, err := planner.processComponent(t.Context(), resolvedComponent{req: llm}, "summarize", plan)
+		b, err := processWithProfile(t, planner, resolvedComponent{req: llm}, "summarize", plan)
 		require.NoError(t, err)
 
 		assert.Equal(t, a, b)
@@ -856,14 +882,14 @@ func TestProcessComponentRAGSharing(t *testing.T) {
 	llmHashes, embeddingHashes := map[string]bool{}, map[string]bool{}
 
 	for _, svc := range []string{"chat", "digitize", "similarity"} {
-		hash, err := planner.processComponent(t.Context(), resolvedComponent{req: embedding}, svc, plan)
+		hash, err := processWithProfile(t, planner, resolvedComponent{req: embedding}, svc, plan)
 		require.NoError(t, err)
 
 		embeddingHashes[hash] = true
 	}
 
 	for _, svc := range []string{"chat", "digitize"} {
-		hash, err := planner.processComponent(t.Context(), resolvedComponent{req: llm}, svc, plan)
+		hash, err := processWithProfile(t, planner, resolvedComponent{req: llm}, svc, plan)
 		require.NoError(t, err)
 
 		llmHashes[hash] = true

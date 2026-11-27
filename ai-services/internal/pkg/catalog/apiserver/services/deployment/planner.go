@@ -164,8 +164,6 @@ var remoteModelParamKeys = []string{
 }
 
 // processService processes a single service from the request.
-//
-//nolint:cyclop,funlen // one sequence of resolution steps, clearer kept together
 func (p *DeploymentPlanner) processService(
 	ctx context.Context,
 	svc apimodels.Service,
@@ -178,33 +176,16 @@ func (p *DeploymentPlanner) processService(
 	}
 
 	servicePlan := &ServicePlan{
-		CatalogID:     svc.CatalogID,
-		CatalogPath:   path.Join(servicePath, plan.RuntimeType),
-		Version:       svc.Version,
-		ComponentRefs: make([]string, 0),
+		CatalogID:   svc.CatalogID,
+		CatalogPath: path.Join(servicePath, plan.RuntimeType),
+		Version:     svc.Version,
 	}
 
 	// Complete the components bound to an existing model first: the param builder and the
 	// component plans below then see the provider, version and model like for any other component.
-	resolved := make([]resolvedComponent, 0, len(svc.Components))
-	resolvedSvc := svc
-	resolvedSvc.Components = make([]apimodels.Component, 0, len(svc.Components))
-
-	for _, comp := range svc.Components {
-		rc, err := p.resolveComponent(ctx, comp, plan)
-		if err != nil {
-			return fmt.Errorf("failed to resolve component '%s': %w", comp.ComponentType, err)
-		}
-
-		// The profile is known before the values are built: the one the service recommends for a
-		// new model, the one a reused instance runs with.
-		rc.req.Profile, err = p.modelProfile(svc.CatalogID, rc)
-		if err != nil {
-			return fmt.Errorf("failed to resolve component '%s': %w", comp.ComponentType, err)
-		}
-
-		resolved = append(resolved, rc)
-		resolvedSvc.Components = append(resolvedSvc.Components, rc.req)
+	resolved, err := p.resolveComponents(ctx, svc, plan)
+	if err != nil {
+		return err
 	}
 
 	// A remote model the service uses is planned like a model instance that already runs.
@@ -213,41 +194,25 @@ func (p *DeploymentPlanner) processService(
 		return err
 	}
 
-	// Process each component in the service
-	for _, rc := range append(slices.Clone(resolved), connected...) {
-		componentHash, err := p.processComponent(ctx, rc, svc.CatalogID, plan)
-		if err != nil {
-			return fmt.Errorf("failed to process component '%s': %w", rc.req.ComponentType, err)
-		}
-
-		// Add component reference to service
-		servicePlan.ComponentRefs = append(servicePlan.ComponentRefs, componentHash)
+	servicePlan.ComponentRefs, err = p.planComponents(ctx, svc.CatalogID, slices.Concat(resolved, connected), plan)
+	if err != nil {
+		return err
 	}
 
 	if err := checkModelSources(svc.CatalogID, servicePlan, plan); err != nil {
 		return err
 	}
 
-	// Load values using ParamBuilder
-	serviceParams, err := p.paramBuilder.BuildServiceParams(ctx, resolvedSvc, nil)
+	servicePlan.Values, err = p.buildServiceValues(ctx, svc, resolved, connected)
 	if err != nil {
-		return fmt.Errorf("failed to build service params: %w", err)
+		return err
 	}
 
-	// Use values from ParamBuilder (already includes component values nested under component_type)
-	servicePlan.Values = serviceParams.Values
-
-	// A remote model has no component values to load: its model and the params stored in the DB
-	// stand in for them.
-	for _, rc := range connected {
-		serviceParams.Values[rc.req.ComponentType] = remoteModelValues(rc.req, rc.connector)
-	}
-
-	// Extract component values from serviceParams.Values and populate ComponentPlan.Values
+	// Extract component values from the service values and populate ComponentPlan.Values
 	for _, compHash := range servicePlan.ComponentRefs {
 		compPlan := plan.Components[compHash]
-		// Component values are nested under component_type in serviceParams.Values
-		if compValues, ok := serviceParams.Values[compPlan.ComponentType].(map[string]any); ok {
+		// Component values are nested under component_type in the service values
+		if compValues, ok := servicePlan.Values[compPlan.ComponentType].(map[string]any); ok {
 			compPlan.Values = compValues
 		}
 	}
@@ -256,6 +221,84 @@ func (p *DeploymentPlanner) processService(
 	plan.Services[svc.CatalogID] = servicePlan
 
 	return nil
+}
+
+// resolveComponents resolves the components of the service request, each completed from its
+// model instance when bound to one, with the profile it runs with. The profile is known before
+// the values are built: the one the service recommends for a new model, the one a reused
+// instance runs with.
+func (p *DeploymentPlanner) resolveComponents(
+	ctx context.Context,
+	svc apimodels.Service,
+	plan *DeploymentPlan,
+) ([]resolvedComponent, error) {
+	resolved := make([]resolvedComponent, 0, len(svc.Components))
+
+	for _, comp := range svc.Components {
+		rc, err := p.resolveComponent(ctx, comp, plan)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve component '%s': %w", comp.ComponentType, err)
+		}
+
+		rc.req.Profile, err = p.modelProfile(svc.CatalogID, rc)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve component '%s': %w", comp.ComponentType, err)
+		}
+
+		resolved = append(resolved, rc)
+	}
+
+	return resolved, nil
+}
+
+// planComponents plans each component of the service and returns their hashes, the references the
+// service keeps to them.
+func (p *DeploymentPlanner) planComponents(
+	ctx context.Context,
+	catalogID string,
+	components []resolvedComponent,
+	plan *DeploymentPlan,
+) ([]string, error) {
+	refs := make([]string, 0, len(components))
+
+	for _, rc := range components {
+		componentHash, err := p.processComponent(ctx, rc, catalogID, plan)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process component '%s': %w", rc.req.ComponentType, err)
+		}
+
+		refs = append(refs, componentHash)
+	}
+
+	return refs, nil
+}
+
+// buildServiceValues builds the values of the service with the ParamBuilder, from its resolved
+// components. They already include the component values nested under component_type. A remote
+// model has no component values to load: its model and the params stored in the DB stand in for them.
+func (p *DeploymentPlanner) buildServiceValues(
+	ctx context.Context,
+	svc apimodels.Service,
+	resolved []resolvedComponent,
+	connected []resolvedComponent,
+) (map[string]any, error) {
+	resolvedSvc := svc
+	resolvedSvc.Components = make([]apimodels.Component, 0, len(resolved))
+
+	for _, rc := range resolved {
+		resolvedSvc.Components = append(resolvedSvc.Components, rc.req)
+	}
+
+	serviceParams, err := p.paramBuilder.BuildServiceParams(ctx, resolvedSvc, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build service params: %w", err)
+	}
+
+	for _, rc := range connected {
+		serviceParams.Values[rc.req.ComponentType] = remoteModelValues(rc.req, rc.connector)
+	}
+
+	return serviceParams.Values, nil
 }
 
 // resolveConnectors resolves the remote model connectors of a service, each into the model
@@ -391,8 +434,9 @@ func remoteModelValues(comp apimodels.Component, conn *dbmodels.Connector) map[s
 		}
 
 		// Metadata read back from the DB holds JSON numbers (float64); services expect whole numbers.
-		if f, isFloat := v.(float64); isFloat {
-			v = int(f)
+		// A value that is not one is kept as stored rather than truncated.
+		if n, ok := utils.WholeNumber(v); ok {
+			v = n
 		}
 
 		values[key] = v
@@ -452,7 +496,8 @@ func (p *DeploymentPlanner) resolveComponent(
 }
 
 // processComponent processes a single component from the request and returns its hash.
-// If the same component configuration already exists, it reuses it.
+// If the same component configuration already exists, it reuses it. The profile of a model
+// component is the one already resolved on rc.req (see processService).
 func (p *DeploymentPlanner) processComponent(
 	ctx context.Context,
 	rc resolvedComponent,
@@ -460,11 +505,7 @@ func (p *DeploymentPlanner) processComponent(
 	plan *DeploymentPlan,
 ) (string, error) {
 	comp := rc.req
-
-	profile, err := p.modelProfile(catalogID, rc)
-	if err != nil {
-		return "", err
-	}
+	profile := comp.Profile
 
 	// Calculate component hash based on type + provider + params (+ model, profile and instance)
 	// This allows deduplication: same config = same deployment
