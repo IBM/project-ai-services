@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -13,24 +12,17 @@ import (
 
 // InjectServiceAuthValues populates auth-related values in a service's Values map if not already explicitly set.
 // It handles:
-// - authAudience: default audience if missing
-// - authJwksUrl: URL to fetch the catalog JWKS keys (OpenShift only)
-// - authCatalogApiUrl: base URL for the catalog API, used by the UI exchange proxy (OpenShift only)
-// - authJwksPlaintextHosts: hosts allowed to serve JWKS over plain HTTP (OpenShift only)
-// - authCatalogCaBundle (OpenShift only): CA bundle PEM if present in the catalog environment or already set.
+//   - authAudience: default audience if missing
+//   - authCatalogCaBundleSecret (OpenShift only): name of the Secret that holds the catalog CA bundle,
+//     set when the catalog environment has one. The PEM itself never enters values.
 //
-// On Podman only authAudience is set per service. The other values are the same for every
-// service on a worker, so EnsurePodmanCatalogAuthSecret stores them once in a shared secret that
-// the pods read through envFrom.
-func InjectServiceAuthValues(
-	ctx context.Context,
-	serviceID string,
-	values map[string]any,
-	runtimeType string,
-	isRemoteWorker bool,
-) error {
+// The catalog addresses (JWKS URL, catalog API and UI URLs, plaintext hosts) are the same for every
+// service on a worker or in an application, so they are not values. EnsurePodmanCatalogAuthSecret
+// and EnsureOpenShiftCatalogAuthSecret store them once in a shared "catalog-auth" secret that the
+// pods read through envFrom.
+func InjectServiceAuthValues(serviceID string, values map[string]any, runtimeType string) {
 	if values == nil {
-		return nil
+		return
 	}
 
 	// Default audience is the service catalog ID if not set
@@ -38,24 +30,16 @@ func InjectServiceAuthValues(
 		values["authAudience"] = serviceID
 	}
 
-	// If authJwksUrl is already explicitly set by caller/operator, keep it
-	existingJwksURL, _ := values["authJwksUrl"].(string)
-
-	switch runtimeType {
-	case runtimeTypes.RuntimeTypeOpenShift.String():
-		if err := injectOpenShiftAuth(ctx, values, existingJwksURL, isRemoteWorker); err != nil {
-			return err
-		}
-
-		// Propagate CA bundle from environment if not set in values
-		if _, ok := values["authCatalogCaBundle"]; !ok || values["authCatalogCaBundle"] == "" {
-			if envCA := utils.GetEnv("AUTH_CATALOG_CA_BUNDLE", ""); envCA != "" {
-				values["authCatalogCaBundle"] = envCA
-			}
-		}
+	if runtimeType == runtimeTypes.RuntimeTypeOpenShift.String() && catalogCABundleFromEnv() != "" {
+		// Always overwrite: a value supplied in the request must not point the pod at another Secret.
+		values["authCatalogCaBundleSecret"] = CatalogCABundleSecretName
 	}
+}
 
-	return nil
+// catalogCABundleFromEnv returns the PEM CA bundle the catalog environment provides for services
+// that verify a catalog served over a private CA, or "".
+func catalogCABundleFromEnv() string {
+	return utils.GetEnv("AUTH_CATALOG_CA_BUNDLE", "")
 }
 
 // CredentialProvisioner creates and revokes the per-deployment service credentials (DA2).
@@ -66,72 +50,6 @@ type CredentialProvisioner interface {
 	// RevokeForDeployment revokes every credential of a deployment, for a deployment that
 	// failed or a service that was deleted.
 	RevokeForDeployment(ctx context.Context, deploymentID string) error
-}
-
-func injectOpenShiftAuth(ctx context.Context, values map[string]any, existingJwksURL string, isRemoteWorker bool) error {
-	if !isRemoteWorker {
-		injectCoLocatedOpenShiftAuth(values, existingJwksURL)
-
-		return nil
-	}
-
-	return injectRemoteOpenShiftAuth(ctx, values, existingJwksURL)
-}
-
-func injectCoLocatedOpenShiftAuth(values map[string]any, existingJwksURL string) {
-	clusterDNS := fmt.Sprintf("catalog-api.%s.svc.cluster.local:8080", constants.CatalogAppName)
-	if existingJwksURL == "" {
-		values["authJwksUrl"] = fmt.Sprintf("http://%s/.well-known/jwks.json", clusterDNS)
-	}
-	if _, ok := values["authCatalogApiUrl"]; !ok || values["authCatalogApiUrl"] == "" {
-		values["authCatalogApiUrl"] = fmt.Sprintf("http://%s", clusterDNS)
-	}
-	if _, ok := values["authJwksPlaintextHosts"]; !ok || values["authJwksPlaintextHosts"] == "" {
-		values["authJwksPlaintextHosts"] = fmt.Sprintf("catalog-api.%s.svc.cluster.local", constants.CatalogAppName)
-	}
-}
-
-func injectRemoteOpenShiftAuth(ctx context.Context, values map[string]any, existingJwksURL string) error {
-	publicURL, err := resolveOpenShiftPublicCatalogURL(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to resolve catalog public URL for remote worker: %w", err)
-	}
-	if existingJwksURL == "" {
-		values["authJwksUrl"] = fmt.Sprintf("%s/.well-known/jwks.json", publicURL)
-	}
-	if _, ok := values["authCatalogApiUrl"]; !ok || values["authCatalogApiUrl"] == "" {
-		values["authCatalogApiUrl"] = publicURL
-	}
-	injectCatalogUIURL(values, catalogUIURLFromAPIURL(publicURL))
-	if _, ok := values["authJwksPlaintextHosts"]; !ok {
-		values["authJwksPlaintextHosts"] = ""
-	}
-
-	return nil
-}
-
-// injectCatalogUIURL sets authCatalogUiUrl, the catalog UI address a service UI sends the
-// browser to for sign-in. A service UI on another host cannot infer it from its own address.
-// Only a service whose values.yaml declares authCatalogUiUrl (it has a UI) gets the value;
-// the other services' schemas reject unknown keys. CATALOG_PUBLIC_UI_URL wins; otherwise
-// derivedURL is used. If neither is set it is left unset and the UI falls back to inferring
-// it from its own host name.
-func injectCatalogUIURL(values map[string]any, derivedURL string) {
-	current, declared := values["authCatalogUiUrl"]
-	if !declared {
-		return
-	}
-	if current != "" {
-		return
-	}
-	if envURL := utils.GetEnv("CATALOG_PUBLIC_UI_URL", ""); envURL != "" {
-		values["authCatalogUiUrl"] = envURL
-
-		return
-	}
-	if derivedURL != "" {
-		values["authCatalogUiUrl"] = derivedURL
-	}
 }
 
 // catalogUIURLFromAPIURL derives the catalog UI address from the public catalog API address

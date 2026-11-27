@@ -41,19 +41,16 @@ mcp:
       cpu: "250m"
       memory: "128Mi"
 
-# Inbound auth: chat verifies catalog tokens whose audience is authAudience. The catalog sets
-# authJwksUrl and authCatalogApiUrl at deploy time.
+# Inbound auth: chat verifies catalog tokens whose audience is authAudience. The catalog
+# addresses (JWKS URL, API URL, UI URL, plaintext hosts) come from the shared "catalog-auth"
+# secret that the catalog creates in the namespace at deploy time.
 # Outbound auth: chat trades a service credential for a short-lived similarity token. The
 # catalog creates the credential and its Secret at deploy time and sets authServiceCredentialSecret
 # to the Secret's name; the credential itself never passes through values. Never set it here.
-authJwksUrl: ""
 authAudience: "chat"
-authCatalogApiUrl: ""
-# Address of the catalog UI (sign-in page). Set by the catalog at deploy time; empty means the UI infers it.
-authCatalogUiUrl: ""
-authCatalogCaBundle: ""
+# Name of the Secret that holds the catalog CA bundle. Set by the catalog at deploy time when it
+# has one; the PEM itself never passes through values.
+authCatalogCaBundleSecret: ""
 authCatalogHostAliases: ""
 # @credential:service grants=similarity:read
 authServiceCredentialSecret: ""
-# Comma-separated hosts allowed to be reached over plain HTTP. Empty (HTTPS only) by default.
-authJwksPlaintextHosts: ""

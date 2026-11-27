@@ -144,15 +144,10 @@ spec:
               value: "{{ .Values.digitize.numShards }}"
             - name: LOG_LEVEL
               value: "{{ .Values.digitize.log_level }}"
-            - name: AUTH_JWKS_URL
-              value: "{{ .Values.authJwksUrl }}"
+            # AUTH_JWKS_URL and AUTH_JWKS_PLAINTEXT_HOSTS come from the shared catalog-auth secret.
             - name: AUTH_AUDIENCE
               value: "{{ .Values.authAudience }}"
-            {{- if .Values.authJwksPlaintextHosts }}
-            - name: AUTH_JWKS_PLAINTEXT_HOSTS
-              value: "{{ .Values.authJwksPlaintextHosts }}"
-            {{- end }}
-            {{- if .Values.authCatalogCaBundle }}
+            {{- if .Values.authCatalogCaBundleSecret }}
             - name: AUTH_CATALOG_CA_BUNDLE
               value: "/etc/ssl/certs/catalog-ca-bundle.crt"
             {{- end }}
@@ -171,6 +166,9 @@ spec:
               value: "4"
             - name: OPENBLAS_NUM_THREADS
               value: "1"
+          envFrom:
+            - secretRef:
+                name: "catalog-auth"
           ports:
             - containerPort: 4000
               protocol: TCP
@@ -200,7 +198,7 @@ spec:
           volumeMounts:
             - mountPath: /var/cache
               name: cache
-            {{- if .Values.authCatalogCaBundle }}
+            {{- if .Values.authCatalogCaBundleSecret }}
             - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
               subPath: ca-bundle.crt
               name: ca-bundle
@@ -245,8 +243,8 @@ spec:
         - name: cache
           persistentVolumeClaim:
             claimName: digitize-cache
-        {{- if .Values.authCatalogCaBundle }}
+        {{- if .Values.authCatalogCaBundleSecret }}
         - name: ca-bundle
-          configMap:
-            name: "digitize-ca-bundle"
+          secret:
+            secretName: {{ .Values.authCatalogCaBundleSecret | quote }}
         {{- end }}

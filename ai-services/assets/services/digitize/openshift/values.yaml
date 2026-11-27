@@ -46,13 +46,11 @@ mcp:
       cpu: "250m"
       memory: "512Mi"
 
-authJwksUrl: ""
+# The catalog addresses (JWKS URL, API URL, UI URL, plaintext hosts) come from the shared
+# "catalog-auth" secret that the catalog creates in the namespace at deploy time.
 authAudience: "digitize"
-authCatalogApiUrl: ""
-# Address of the catalog UI (sign-in page). Set by the catalog at deploy time; empty means the UI infers it.
-authCatalogUiUrl: ""
-authCatalogCaBundle: ""
+# Name of the Secret that holds the catalog CA bundle. Set by the catalog at deploy time when it
+# has one; the PEM itself never passes through values.
+authCatalogCaBundleSecret: ""
 authCatalogHostAliases: ""
-# Comma-separated hosts allowed to serve JWKS over plain HTTP. Empty (HTTPS only) by default.
-authJwksPlaintextHosts: ""
 

@@ -592,9 +592,7 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 		// Don't fail the deployment if status update fails
 	}
 
-	if err := deploymentauth.InjectServiceAuthValues(ctx, svc.CatalogID, svc.Values, d.runtimeType, d.isRemoteWorker()); err != nil {
-		return fmt.Errorf("failed to inject auth values for service %s: %w", svc.CatalogID, err)
-	}
+	deploymentauth.InjectServiceAuthValues(svc.CatalogID, svc.Values, d.runtimeType)
 
 	// Load service from catalog
 	service, err := d.catalogProvider.LoadService(svc.CatalogID)

@@ -96,15 +96,11 @@ spec:
             - name: CHATBOT_SIMILARITY_SERVICE_URL
               value: "http://similarity-api:7000"
             # Inbound auth: every route except /health, /ready and /openapi.json needs a catalog token.
-            - name: AUTH_JWKS_URL
-              value: "{{ .Values.authJwksUrl }}"
+            # AUTH_JWKS_URL, AUTH_JWKS_PLAINTEXT_HOSTS and AUTH_CATALOG_API_URL come from the shared
+            # catalog-auth secret (envFrom below).
             - name: AUTH_AUDIENCE
               value: "{{ .Values.authAudience }}"
-          {{- if .Values.authJwksPlaintextHosts }}
-            - name: AUTH_JWKS_PLAINTEXT_HOSTS
-              value: "{{ .Values.authJwksPlaintextHosts }}"
-          {{- end }}
-          {{- if .Values.authCatalogCaBundle }}
+          {{- if .Values.authCatalogCaBundleSecret }}
             - name: AUTH_CATALOG_CA_BUNDLE
               value: "/etc/ssl/certs/catalog-ca-bundle.crt"
           {{- end }}
@@ -112,8 +108,6 @@ spec:
             # Credential to obtain a similarity token from the catalog. Mounted from a Secret, never a literal value.
             - name: AUTH_SERVICE_CREDENTIAL_FILE
               value: "/etc/secret/service-credential/credential"
-            - name: AUTH_CATALOG_API_URL
-              value: "{{ .Values.authCatalogApiUrl }}"
           {{- end }}
           {{- if .Values.llm.apiKey }}
             - name: LLM_API_KEY
@@ -122,6 +116,9 @@ spec:
                   name: "vllm-instruct-api-key"
                   key: apiKey
           {{- end }}
+          envFrom:
+            - secretRef:
+                name: "catalog-auth"
           ports:
             - containerPort: 5000
               protocol: TCP
@@ -148,14 +145,14 @@ spec:
             limits:
               cpu: {{ .Values.backend.resources.limits.cpu | quote }}
               memory: {{ .Values.backend.resources.limits.memory | quote }}
-          {{- if or .Values.authServiceCredentialSecret .Values.authCatalogCaBundle }}
+          {{- if or .Values.authServiceCredentialSecret .Values.authCatalogCaBundleSecret }}
           volumeMounts:
           {{- if .Values.authServiceCredentialSecret }}
             - mountPath: /etc/secret/service-credential
               name: service-credential
               readOnly: true
           {{- end }}
-          {{- if .Values.authCatalogCaBundle }}
+          {{- if .Values.authCatalogCaBundleSecret }}
             - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
               subPath: ca-bundle.crt
               name: ca-bundle
@@ -197,16 +194,16 @@ spec:
               cpu: {{ .Values.mcp.resources.limits.cpu | quote }}
               memory: {{ .Values.mcp.resources.limits.memory | quote }}
         {{- end }}
-      {{- if or .Values.authServiceCredentialSecret .Values.authCatalogCaBundle }}
+      {{- if or .Values.authServiceCredentialSecret .Values.authCatalogCaBundleSecret }}
       volumes:
       {{- if .Values.authServiceCredentialSecret }}
         - name: service-credential
           secret:
             secretName: {{ .Values.authServiceCredentialSecret | quote }}
       {{- end }}
-      {{- if .Values.authCatalogCaBundle }}
+      {{- if .Values.authCatalogCaBundleSecret }}
         - name: ca-bundle
-          configMap:
-            name: "chat-ca-bundle"
+          secret:
+            secretName: {{ .Values.authCatalogCaBundleSecret | quote }}
       {{- end }}
       {{- end }}

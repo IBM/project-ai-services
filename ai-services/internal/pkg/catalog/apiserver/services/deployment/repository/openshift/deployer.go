@@ -175,6 +175,12 @@ func (d *OpenShiftDeployer) deployComponent(ctx context.Context, plan *Deploymen
 // deployServicesConcurrently installs all service Helm charts in parallel and waits for all pods
 // to become Ready.
 func (d *OpenShiftDeployer) deployServicesConcurrently(ctx context.Context, plan *DeploymentPlan) error {
+	// The catalog auth settings are the same for every service in the namespace, so store them
+	// once in a shared secret that the service pods read, before any of them starts.
+	if err := deploymentauth.EnsureOpenShiftCatalogAuthSecret(ctx, d.runtime, d.isRemoteWorker()); err != nil {
+		return err
+	}
+
 	// Build id → dbID index so RunConcurrently can track status per service.
 	items := make(map[string]uuid.UUID, len(plan.Services))
 	for id, svc := range plan.Services {
@@ -196,18 +202,20 @@ func (d *OpenShiftDeployer) deployServicesConcurrently(ctx context.Context, plan
 	)
 }
 
+// isRemoteWorker reports whether services are deployed to a remote cluster, which reaches the
+// catalog on its public address rather than on the in-cluster Service name.
+func (d *OpenShiftDeployer) isRemoteWorker() bool {
+	_, ok := d.runtime.(*remoteruntime.RemoteRuntime)
+
+	return ok
+}
+
 // deployService installs or upgrades the Helm chart for a single service,
 // then reads the OpenShift Routes for the release and stores endpoints in the database.
 func (d *OpenShiftDeployer) deployService(ctx context.Context, plan *DeploymentPlan, svc *ServicePlan) error {
 	releaseName := catalogutils.HelmReleaseName(plan.ApplicationID, svc.CatalogID)
 
-	isRemote := false
-	if _, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
-		isRemote = true
-	}
-	if err := deploymentauth.InjectServiceAuthValues(ctx, svc.CatalogID, svc.Values, d.runtime.Type().String(), isRemote); err != nil {
-		return fmt.Errorf("failed to inject auth values for service %s: %w", svc.CatalogID, err)
-	}
+	deploymentauth.InjectServiceAuthValues(svc.CatalogID, svc.Values, d.runtime.Type().String())
 
 	// Provision the service credential, if the asset declares one, and hand the chart only the
 	// name of the Secret that holds it, so the credential never reaches the Helm release.

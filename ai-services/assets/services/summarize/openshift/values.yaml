@@ -29,10 +29,10 @@ mcp:
       cpu: "250m"
       memory: "512Mi"
 
-authJwksUrl: ""
+# The catalog addresses (JWKS URL, plaintext hosts) come from the shared "catalog-auth" secret
+# that the catalog creates in the namespace at deploy time.
 authAudience: "summarize"
-authCatalogApiUrl: ""
-authCatalogCaBundle: ""
+# Name of the Secret that holds the catalog CA bundle. Set by the catalog at deploy time when it
+# has one; the PEM itself never passes through values.
+authCatalogCaBundleSecret: ""
 authCatalogHostAliases: ""
-# Comma-separated hosts allowed to serve JWKS over plain HTTP. Empty (HTTPS only) by default.
-authJwksPlaintextHosts: ""

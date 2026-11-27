@@ -47,18 +47,14 @@ spec:
               value: "digitize-api"
             - name: BACKEND_PORT
               value: "4000"
-            {{- if .Values.authCatalogApiUrl }}
-            - name: CATALOG_API_URL
-              value: "{{ .Values.authCatalogApiUrl }}"
-            {{- end }}
-            {{- if .Values.authCatalogUiUrl }}
-            - name: CATALOG_UI_URL
-              value: "{{ .Values.authCatalogUiUrl }}"
-            {{- end }}
-            {{- if .Values.authCatalogCaBundle }}
+            {{- if .Values.authCatalogCaBundleSecret }}
             - name: AUTH_CATALOG_CA_BUNDLE
               value: "/etc/ssl/certs/catalog-ca-bundle.crt"
             {{- end }}
+          # CATALOG_API_URL and CATALOG_UI_URL come from the shared catalog-auth secret.
+          envFrom:
+            - secretRef:
+                name: "catalog-auth"
           ports:
             - containerPort: 4001
               protocol: TCP
@@ -78,16 +74,16 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
-          {{- if .Values.authCatalogCaBundle }}
+          {{- if .Values.authCatalogCaBundleSecret }}
           volumeMounts:
             - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
               subPath: ca-bundle.crt
               name: ca-bundle
               readOnly: true
           {{- end }}
-      {{- if .Values.authCatalogCaBundle }}
+      {{- if .Values.authCatalogCaBundleSecret }}
       volumes:
         - name: ca-bundle
-          configMap:
-            name: "digitize-ca-bundle"
+          secret:
+            secretName: {{ .Values.authCatalogCaBundleSecret | quote }}
       {{- end }}

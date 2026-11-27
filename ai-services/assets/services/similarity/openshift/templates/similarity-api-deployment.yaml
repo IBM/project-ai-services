@@ -81,18 +81,16 @@ spec:
                   key: password
             - name: LOG_LEVEL
               value: "{{ .Values.similarity.log_level }}"
-            - name: AUTH_JWKS_URL
-              value: "{{ .Values.authJwksUrl }}"
+            # AUTH_JWKS_URL and AUTH_JWKS_PLAINTEXT_HOSTS come from the shared catalog-auth secret.
             - name: AUTH_AUDIENCE
               value: "{{ .Values.authAudience }}"
-            {{- if .Values.authJwksPlaintextHosts }}
-            - name: AUTH_JWKS_PLAINTEXT_HOSTS
-              value: "{{ .Values.authJwksPlaintextHosts }}"
-            {{- end }}
-            {{- if .Values.authCatalogCaBundle }}
+            {{- if .Values.authCatalogCaBundleSecret }}
             - name: AUTH_CATALOG_CA_BUNDLE
               value: "/etc/ssl/certs/catalog-ca-bundle.crt"
             {{- end }}
+          envFrom:
+            - secretRef:
+                name: "catalog-auth"
           ports:
             - containerPort: 7000
               protocol: TCP
@@ -119,7 +117,7 @@ spec:
             limits:
               cpu: {{ .Values.similarity.resources.limits.cpu | quote }}
               memory: {{ .Values.similarity.resources.limits.memory | quote }}
-          {{- if .Values.authCatalogCaBundle }}
+          {{- if .Values.authCatalogCaBundleSecret }}
           volumeMounts:
             - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
               subPath: ca-bundle.crt
@@ -161,9 +159,9 @@ spec:
               cpu: {{ .Values.mcp.resources.limits.cpu | quote }}
               memory: {{ .Values.mcp.resources.limits.memory | quote }}
         {{- end }}
-      {{- if .Values.authCatalogCaBundle }}
+      {{- if .Values.authCatalogCaBundleSecret }}
       volumes:
         - name: ca-bundle
-          configMap:
-            name: "similarity-ca-bundle"
+          secret:
+            secretName: {{ .Values.authCatalogCaBundleSecret | quote }}
       {{- end }}
