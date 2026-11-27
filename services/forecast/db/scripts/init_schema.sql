@@ -1,7 +1,5 @@
 -- Database initialization script for forecast metadata
 -- This script is idempotent and safe to run multiple times.
--- The restricted forecast_worker role and its grants are created by init_db.py,
--- because the role name and password come from the environment.
 
 -- Schema for the APScheduler job store.
 -- SQLAlchemyJobStore creates its own table under this schema but cannot create
@@ -39,18 +37,18 @@ CREATE TABLE IF NOT EXISTS training_configs (
 );
 
 -- Training jobs, also the run history. seq is the primary key and the forecaster version: the database
--- assigns it (GENERATED ALWAYS), so neither the API nor the worker can pick one.
+-- assigns it (GENERATED ALWAYS), so nothing can pick one.
 -- Deleting a connector sets connector_id to NULL on its jobs. For a QUEUED or
 -- RUNNING job that violates chk_jobs_active_has_connector, so the delete fails.
--- result is a JSON object. The worker cannot read it, so each worker write replaces
--- the whole value:
---   rows_read          worker, once when it has read the data file; repeated in the final write
---   algorithm          worker, when training finishes: the algorithm AutoGluon chose
---   validation_metric  worker, when training finishes: the metric AutoGluon validated on
---   validation_score   worker, when training finishes: AutoGluon's score on its own validation rows
---   test_score         worker, when training finishes: the same metric on a held-out 20% of the rows
---   training_seconds   worker, when training finishes
---   attempts           API, after the worker exits (merge onto COALESCE(result, '{}'))
+-- result is a JSON object. The worker has no database access: it reports in result.json, and the API
+-- replaces the whole value with the keys it knows from that file once the worker has exited:
+--   rows_read          reported by the worker once it has read the data file; repeated in the final report
+--   algorithm          reported by the worker when training finishes: the algorithm AutoGluon chose
+--   validation_metric  reported by the worker when training finishes: the metric AutoGluon validated on
+--   validation_score   reported by the worker when training finishes: AutoGluon's score on its own validation rows
+--   test_score         reported by the worker when training finishes: the same metric on a held-out 20% of the rows
+--   training_seconds   reported by the worker when training finishes
+--   attempts           the API, when the job ends (merged onto the result)
 -- Keys can be missing while a job runs or after it fails.
 CREATE TABLE IF NOT EXISTS jobs (
     seq           BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -80,7 +78,7 @@ CREATE TABLE IF NOT EXISTS forecasters (
     connector_id  UUID        NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
     job_id        BIGINT      REFERENCES jobs(seq) ON DELETE SET NULL,
     version       BIGINT      NOT NULL,
-    metrics       JSONB,                                   -- algorithm and training_seconds, copied from the job's result
+    metrics       JSONB,                                   -- metric, validation_score, test_score and training_seconds, copied from the job's result
     created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (connector_id, version)
 );

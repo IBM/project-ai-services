@@ -71,8 +71,10 @@ def _resolve_columns(
             missing.append(name)
 
     if missing:
+        # The columns of the table are schema metadata: they go to the log, and the message names only what was asked for.
+        logger.error("Column(s) %s not found in table '%s'. Available columns: %s", missing, table, [c.name for c in available])
         raise DBColumnNotFoundError(
-            f"Column(s) {missing} not found in table '{table}'. Available columns: {[c.name for c in available]}"
+            f"Column(s) {missing} not found in table '{table}'. Check the column names of the training configuration."
         )
 
     names = [col.name for col in resolved]

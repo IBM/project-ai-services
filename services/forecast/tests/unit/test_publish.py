@@ -68,6 +68,40 @@ def test_publish_never_writes_into_or_deletes_a_staging_directory_that_is_alread
     assert not (repository / "fc_x_5").exists()
 
 
+@pytest.mark.parametrize("kind", ["file link", "directory link", "dangling link", "fifo", "link in a subdirectory"])
+def test_publish_refuses_a_model_directory_with_a_link_or_a_special_file(volume, tmp_path, kind):
+    repository, model_dir = volume
+    secret = tmp_path / "secret.txt"
+    secret.write_text("api secret")
+    if kind == "file link":
+        (model_dir / "leak").symlink_to(secret)
+    elif kind == "directory link":
+        (model_dir / "leak").symlink_to(tmp_path)
+    elif kind == "dangling link":
+        (model_dir / "leak").symlink_to(tmp_path / "missing")
+    elif kind == "fifo":
+        os.mkfifo(model_dir / "leak")
+    else:
+        (model_dir / "1" / "leak").symlink_to(secret)
+
+    with pytest.raises(ValueError, match="not a regular file or directory"):
+        publish(repository, 5, "fc_x_5", model_dir)
+
+    assert not (repository / STAGING).exists()  # Nothing was created, so nothing needs cleaning up.
+    assert not (repository / "fc_x_5").exists()
+
+
+def test_publish_refuses_a_model_directory_that_is_itself_a_link(volume, tmp_path):
+    repository, model_dir = volume
+    link = tmp_path / "scratch" / "link"
+    link.symlink_to(model_dir, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="not a regular file or directory"):
+        publish(repository, 5, "fc_x_5", link)
+
+    assert not (repository / "fc_x_5").exists()
+
+
 def test_a_failed_copy_leaves_no_staging_directory(volume, monkeypatch):
     repository, model_dir = volume
 
@@ -77,6 +111,21 @@ def test_a_failed_copy_leaves_no_staging_directory(volume, monkeypatch):
     monkeypatch.setattr("forecast.orchestrator.publish.shutil.copyfile", fail)
 
     with pytest.raises(OSError, match="disk full"):
+        publish(repository, 5, "fc_x_5", model_dir)
+
+    assert list((repository / STAGING).iterdir()) == []
+    assert not (repository / "fc_x_5").exists()
+
+
+def test_a_failed_rename_leaves_no_staging_directory(volume, monkeypatch):
+    repository, model_dir = volume
+
+    def fail(self, target):
+        raise OSError("cross-device link")
+
+    monkeypatch.setattr("pathlib.Path.rename", fail)
+
+    with pytest.raises(OSError, match="cross-device link"):
         publish(repository, 5, "fc_x_5", model_dir)
 
     assert list((repository / STAGING).iterdir()) == []

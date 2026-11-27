@@ -75,9 +75,10 @@ def test_insert_connector_adds_orm_models_to_session():
 
     session.add_all.assert_called_once()
     added_objects = session.add_all.call_args[0][0]
-    assert len(added_objects) == 3
+    # No job: the first training inserts its own, as RUNNING, when it runs.
+    assert len(added_objects) == 2
 
-    connector, training_config, job = added_objects
+    connector, training_config = added_objects
     assert isinstance(connector, Connector)
     assert connector.id == conn_uuid
     assert connector.name == "test-conn"
@@ -91,10 +92,6 @@ def test_insert_connector_adds_orm_models_to_session():
     assert training_config.target_column == "LATE"
     assert training_config.input_columns == [{"name": "COL1", "type": "string"}]
     assert training_config.schedule == "daily"
-
-    assert isinstance(job, Job)
-    assert job.connector_id == conn_uuid
-    assert job.status == "QUEUED"
 
     session.flush.assert_called_once()
 

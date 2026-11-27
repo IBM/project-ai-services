@@ -1,6 +1,8 @@
 """Triton helpers: startup checks and inference HTTP client."""
 
+import asyncio
 import math
+import time
 from typing import Any, NoReturn
 from urllib.parse import quote
 
@@ -33,6 +35,105 @@ def triton_url_check() -> None:
         raise RuntimeError("TRITON_URL is not set")
     if not url.lower().startswith(("http://", "https://")):
         raise RuntimeError("TRITON_URL must start with http:// or https://")
+
+
+class TritonLoadError(Exception):
+    """Triton could not load a forecaster. The message is written for the user and holds no secret."""
+
+
+_LOAD_POLL_INTERVAL_S = 1.0
+# Named here so that a test can replace the clock and the wait without touching asyncio or time.
+_monotonic = time.monotonic
+_sleep = asyncio.sleep
+_REASON_CHARS = 300
+
+
+async def _repository_index() -> list:
+    """Return Triton's repository index: one entry per model with its ``state`` and ``reason``."""
+    triton_url = settings.forecast.triton_url.strip().rstrip("/")
+    response = await get_client().post(
+        f"{triton_url}/v2/repository/index", json={}, timeout=settings.forecast.triton_load_timeout_s
+    )
+    try:
+        index = response.json()
+    except ValueError:
+        index = None
+    if response.status_code != 200 or not isinstance(index, list):
+        raise TritonLoadError(f"Triton returned an unusable repository index (HTTP {response.status_code})")
+    return index
+
+
+async def load_model(model_name: str) -> None:
+    """Load the forecaster ``model_name`` into Triton and wait until its state is READY.
+
+    Calls POST /v2/repository/models/<model_name>/load, which returns when the model has loaded or
+    failed, then reads POST /v2/repository/index for the model's state. Both calls, and the wait on
+    the state, are bound by TRITON_LOAD_TIMEOUT_S. The load is not retried.
+
+    Raises:
+        TritonLoadError: Triton cannot be reached, refuses the model or does not report it READY.
+    """
+    triton_url = settings.forecast.triton_url.strip().rstrip("/")
+    timeout = settings.forecast.triton_load_timeout_s
+    deadline = _monotonic() + timeout
+    try:
+        response = await get_client().post(
+            f"{triton_url}/v2/repository/models/{quote(model_name, safe='')}/load", timeout=timeout
+        )
+        if response.status_code != 200:
+            logger.error(f"Triton refused to load {model_name} (HTTP {response.status_code}): {response.text[:500]}")
+            raise TritonLoadError(
+                f"Triton could not load forecaster {model_name} (HTTP {response.status_code}): "
+                f"{_error_text(response)}"
+            )
+        while True:
+            entry = next((m for m in await _repository_index() if m.get("name") == model_name), None)
+            state = entry.get("state") if entry else None
+            if state == "READY":
+                return
+            if state == "UNAVAILABLE":
+                raise TritonLoadError(
+                    f"Triton could not load forecaster {model_name}: {str(entry.get('reason') or 'no reason given')[:_REASON_CHARS]}"
+                )
+            if _monotonic() >= deadline:
+                raise TritonLoadError(
+                    f"Forecaster {model_name} was not READY in Triton after {timeout} s (state {state or 'unknown'})"
+                )
+            await _sleep(_LOAD_POLL_INTERVAL_S)
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        logger.error(f"Triton unreachable while loading {model_name}: {type(exc).__name__}")
+        raise TritonLoadError("Triton cannot be reached") from exc
+    except httpx.RequestError as exc:
+        logger.error(f"Triton request failed while loading {model_name}: {type(exc).__name__}")
+        raise TritonLoadError("The request to Triton failed") from exc
+
+
+async def unload_model(model_name: str) -> None:
+    """Ask Triton to unload the forecaster ``model_name``. Best effort: it never raises.
+
+    Used to take back a load whose result could not be kept. Calls POST /v2/repository/models/<model_name>/unload,
+    bound by TRITON_LOAD_TIMEOUT_S. A failure is logged and not retried.
+    """
+    triton_url = settings.forecast.triton_url.strip().rstrip("/")
+    try:
+        response = await get_client().post(
+            f"{triton_url}/v2/repository/models/{quote(model_name, safe='')}/unload",
+            timeout=settings.forecast.triton_load_timeout_s,
+        )
+    except Exception as exc:
+        logger.warning(f"Could not unload {model_name} from Triton: {type(exc).__name__}")
+        return
+    if response.status_code != 200:
+        logger.warning(f"Triton did not unload {model_name} (HTTP {response.status_code}): {response.text[:500]}")
+
+
+def _error_text(response: httpx.Response) -> str:
+    """The error that Triton gave, cut to a message that fits a job."""
+    try:
+        text = response.json().get("error", "")
+    except (ValueError, AttributeError):
+        text = response.text
+    return str(text or "no reason given")[:_REASON_CHARS]
 
 
 def _bad_response(reason: str) -> NoReturn:

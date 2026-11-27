@@ -163,11 +163,9 @@ class Db2Client:
             err_str = str(exc).lower()
             logger.error("Db2 connection failure on %s:%s - %s", self.host, self.port, exc)
             if any(kw in err_str for kw in ("password", "auth", "credentials", "not authorized", "user id", "unauthorized")):
-                raise DBAuthError(
-                    f"Authentication failed for user '{self.username}' on Db2 host '{self.host}'"
-                ) from exc
+                raise DBAuthError("Authentication to the Db2 source failed. Check the credentials of the connector.") from exc
             raise DBConnectionError(
-                f"Cannot connect to Db2 at {self.host}:{self.port} - {exc}"
+                "Cannot connect to the Db2 source. Check the host and port of the connector."
             ) from exc
 
     def test_connection(self) -> bool:
@@ -181,8 +179,8 @@ class Db2Client:
         except Exception as exc:
             err_str = str(exc).lower()
             if any(kw in err_str for kw in ("password", "auth", "credentials", "not authorized")):
-                raise DBAuthError(f"Authentication failed on Db2 host '{self.host}': {exc}") from exc
-            raise DBConnectionError(f"Connection test failed on Db2 host '{self.host}': {exc}") from exc
+                raise DBAuthError("Authentication to the Db2 source failed. Check the credentials of the connector.") from exc
+            raise DBConnectionError("The Db2 source did not answer a test query.") from exc
         finally:
             cursor.close()
 
@@ -239,13 +237,13 @@ class Db2Client:
                 )
             rows = cursor.fetchall()
         except Exception as exc:
-            raise DBConnectionError(f"Failed to query columns for table '{table}': {exc}") from exc
+            raise DBConnectionError(f"Failed to query the columns of table '{table}'.") from exc
         finally:
             cursor.close()
 
         if not rows:
             raise DBTableNotFoundError(
-                f"Table '{table}' not found or not accessible for user '{self.username}'"
+                f"Table '{table}' not found or not accessible to the user of the connector."
             )
 
         # Group by catalogue (schema, table); more than one group means names differing by case.
@@ -255,9 +253,14 @@ class Db2Client:
         if len(tables) > 1:
             exact = [key for key in tables if key[1] == name and (schema is None or key[0] == schema)]
             if len(exact) != 1:
+                # The names of the other tables are schema metadata: they go to the log, not to the message.
+                logger.error(
+                    "Table reference '%s' matches several tables that differ only by case: %s",
+                    table, sorted(".".join(key) for key in tables),
+                )
                 raise InvalidTableReferenceError(
-                    f"Table reference '{table}' matches several tables that differ only by case: "
-                    f"{sorted('.'.join(key) for key in tables)}. Use the exact spelling."
+                    f"Table reference '{table}' matches {len(tables)} tables that differ only by case. "
+                    "Use the exact spelling."
                 )
             tables = {exact[0]: tables[exact[0]]}
         (table_schema, table_name), table_rows = next(iter(tables.items()))
@@ -349,12 +352,12 @@ class Db2Client:
         except Exception as exc:
             err_str = str(exc).lower()
             if "not found" in err_str or "does not exist" in err_str or "sql0204" in err_str:
-                raise DBTableNotFoundError(f"Database table not found during streaming: {exc}") from exc
+                raise DBTableNotFoundError("The table was not found while it was being read.") from exc
             if any(kw in err_str for kw in ("column", "undefined column", "sql0206")):
-                raise DBColumnNotFoundError(f"Column error during streaming: {exc}") from exc
+                raise DBColumnNotFoundError("A column was rejected while the table was being read.") from exc
             if any(kw in err_str for kw in ("auth", "not authorized", "permission", "sql0551")):
-                raise DBAuthError(f"Permission denied during streaming: {exc}") from exc
-            raise DBConnectionError(f"Error during Db2 batch streaming: {exc}") from exc
+                raise DBAuthError("Permission was denied while the table was being read.") from exc
+            raise DBConnectionError("Reading the table from the Db2 source failed.") from exc
         finally:
             # Closing the cursor talks to the server, so it gets the connect timeout
             # instead of what is left of the query timeout.

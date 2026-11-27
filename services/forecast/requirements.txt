@@ -25,6 +25,13 @@ onnx>=1.16.0
 onnxmltools>=1.12.0
 onnxruntime>=1.18.0
 
+# Training scheduler, at the version digitize uses
+apscheduler[sqlalchemy]==3.11.3
+
+# Memory watchdog and process-group reaping of the training subprocesses (orchestrator/process.py). The
+# service-base image ships it too.
+psutil>=5.9
+
 # Triton inference client (async HTTP)
 httpx>=0.24.0
 

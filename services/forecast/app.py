@@ -29,8 +29,9 @@ from forecast.settings import settings
 set_log_level(settings.common.app.log_level)
 
 from forecast.api.v1 import connectors, forecast as forecast_routes  # noqa: E402
-from forecast.db.connection import check_db_configured, close_db_connections  # noqa: E402
+from forecast.db.connection import check_db_configured, close_db_connections, engine  # noqa: E402
 from forecast.errors import register_exception_handlers  # noqa: E402
+from forecast.training.scheduler import start_scheduler, stop_scheduler  # noqa: E402
 from forecast.triton_client.triton import triton_url_check  # noqa: E402
 from forecast.utils.encryption import validate_cipher  # noqa: E402
 from forecast.utils.http_client import close_client  # noqa: E402
@@ -72,9 +73,16 @@ async def lifespan(app: FastAPI):
 
     triton_url_check()
 
+    # Every training run starts from the scheduler, so it starts last, when the API can serve.
+    start_scheduler(engine)
+
     yield
 
     logger.info("Forecast service shutting down...")
+    try:
+        stop_scheduler()
+    except Exception as exc:
+        logger.error(f"Error stopping the training scheduler: {exc}", exc_info=True)
     try:
         await close_client()
     except Exception as exc:

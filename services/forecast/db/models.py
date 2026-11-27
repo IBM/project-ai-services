@@ -3,9 +3,6 @@ SQLAlchemy ORM models for the forecast metadata tables.
 
 The tables are created by db/scripts/init_schema.sql, not by Base.metadata.create_all,
 so these models must match that file. tests/unit/test_db_models.py checks this.
-
-The restricted forecast_worker role has column-level grants on jobs, so the worker
-must update only jobs.result and jobs.message and must not flush other columns.
 """
 
 import uuid
@@ -116,7 +113,7 @@ class Job(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False)
     message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # rows_read, algorithm, validation_metric, validation_score, test_score, training_seconds
-    # (written by the worker) and attempts (written by the API). Keys can be missing.
+    # (reported by the worker in result.json, stored by the API) and attempts (added by the API). Keys can be missing.
     result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
@@ -159,7 +156,7 @@ class Forecaster(Base):
         BigInteger, ForeignKey("jobs.seq", ondelete="SET NULL"), nullable=True
     )
     version: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    # algorithm and training_seconds, copied from the job's result.
+    # {metric, validation_score, training_seconds}, copied from the job's result (metric is its validation_metric).
     metrics: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()

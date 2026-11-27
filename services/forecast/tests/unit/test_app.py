@@ -10,6 +10,7 @@ Tests cover:
  - Settings defaults and the blank-means-unset rule
  - Startup checks: DB_ENCRYPTION_KEY validation and the TRITON_URL check
  - The worker command line
+ - The training scheduler's start and stop
 """
 
 import logging
@@ -299,10 +300,7 @@ def test_settings_defaults(monkeypatch):
     ):
         monkeypatch.delenv(name, raising=False)
 
-    for name in (
-        "DB_ENCRYPTION_KEY", "WORKER_POSTGRES_USER", "WORKER_POSTGRES_PASSWORD",
-        "DB_POOL_SIZE", "DB_MAX_OVERFLOW",
-    ):
+    for name in ("DB_ENCRYPTION_KEY", "DB_POOL_SIZE", "DB_MAX_OVERFLOW"):
         monkeypatch.delenv(name, raising=False)
 
     from forecast.settings import DatabaseConfig, ForecastConfig
@@ -313,8 +311,6 @@ def test_settings_defaults(monkeypatch):
     config = ForecastConfig()
     assert config.triton_url == ""
     assert config.db_encryption_key.get_secret_value() == ""
-    assert config.worker_postgres_user == ""
-    assert config.worker_postgres_password.get_secret_value() == ""
     assert str(config.model_repo_path) == "/models"
     assert str(config.scratch_dir) == "/var/cache/forecast/scratch"
     assert str(config.data_dir) == "/data"
@@ -362,13 +358,11 @@ def test_blank_memory_limit_removes_the_cap(monkeypatch):
 @pytest.mark.unit
 def test_secrets_are_not_printed(monkeypatch):
     monkeypatch.setenv("DB_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef")
-    monkeypatch.setenv("WORKER_POSTGRES_PASSWORD", "hunter2")
 
     from forecast.settings import ForecastConfig
 
     config = ForecastConfig()
     assert "0123456789abcdef" not in repr(config)
-    assert "hunter2" not in repr(config)
     assert config.db_encryption_key.get_secret_value() == "0123456789abcdef0123456789abcdef"
 
 
@@ -562,6 +556,48 @@ def test_startup_caps_the_thread_limiter_to_the_database_pool():
 
 
 @pytest.mark.unit
+def test_startup_starts_the_training_scheduler_on_the_database_engine_and_shutdown_stops_it():
+    import forecast.app as forecast_app
+
+    with patch.object(forecast_app, "close_db_connections"), patch.object(
+        forecast_app, "start_scheduler"
+    ) as start, patch.object(forecast_app, "stop_scheduler") as stop:
+        with TestClient(forecast_app.app):
+            start.assert_called_once_with(forecast_app.engine)
+            stop.assert_not_called()
+    stop.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_the_scheduler_starts_after_the_startup_checks():
+    import forecast.app as forecast_app
+
+    with patch.object(forecast_app, "close_db_connections"), patch.object(
+        forecast_app, "triton_url_check", side_effect=RuntimeError("TRITON_URL is not set")
+    ), patch.object(forecast_app, "start_scheduler") as start:
+        with pytest.raises(RuntimeError, match="TRITON_URL"):
+            with TestClient(forecast_app.app):
+                pass
+    start.assert_not_called()
+
+
+@pytest.mark.unit
+def test_shutdown_goes_on_when_the_scheduler_fails_to_stop(caplog):
+    import forecast.app as forecast_app
+
+    with patch.object(forecast_app, "close_db_connections") as close_db, patch.object(
+        forecast_app, "close_client", new_callable=AsyncMock
+    ) as close_client, patch.object(
+        forecast_app, "stop_scheduler", side_effect=RuntimeError("boom")
+    ), caplog.at_level("ERROR"):
+        with TestClient(forecast_app.app):
+            pass
+    assert any("Error stopping the training scheduler" in r.getMessage() for r in caplog.records)
+    close_client.assert_awaited_once()
+    close_db.assert_called_once()
+
+
+@pytest.mark.unit
 def test_shutdown_logs_when_closing_the_database_fails(caplog):
     import forecast.app as forecast_app
 
@@ -651,11 +687,13 @@ def test_worker_requires_a_job_id():
 
 
 @pytest.mark.unit
-def test_worker_parses_the_job_id_the_input_and_the_output():
+def test_worker_parses_the_job_file_the_input_and_the_output():
     from pathlib import Path
 
     from forecast.training.main import parse_args
 
-    args = parse_args(["42", "data.parquet", "out/model"])
+    args = parse_args(["run/job.json", "data.parquet", "out/model"])
 
-    assert (args.job_id, args.data_path, args.output_dir) == (42, Path("data.parquet"), Path("out/model"))
+    assert (args.job_file, args.data_path, args.output_dir) == (
+        Path("run/job.json"), Path("data.parquet"), Path("out/model")
+    )
