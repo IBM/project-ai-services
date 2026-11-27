@@ -343,6 +343,7 @@ func (r *RemoteRuntime) ListCRD(ctx context.Context, list *unstructured.Unstruct
 		Version:   gvk.Version,
 		Kind:      gvk.Kind,
 		LabelKeys: labelKeys,
+		Name:      firstOrEmpty(filters["name"]),
 	})
 	if err != nil {
 		return nil, err
@@ -442,4 +443,13 @@ func unmarshalData(res *workerpb.CommandResult, v any) error {
 	}
 
 	return nil
+}
+
+// firstOrEmpty returns the first element of values, or "" when values is empty.
+func firstOrEmpty(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+
+	return values[0]
 }

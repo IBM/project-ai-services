@@ -184,6 +184,8 @@ type ListCRD struct {
 	Version   string   `json:"version"`
 	Kind      string   `json:"kind"`
 	LabelKeys []string `json:"label_keys,omitempty"`
+	// Name restricts the result to the resource with this metadata.name.
+	Name string `json:"name,omitempty"`
 }
 
 // CRDResource is the wire representation of a single CRD resource returned

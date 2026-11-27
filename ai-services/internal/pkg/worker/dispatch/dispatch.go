@@ -516,6 +516,10 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 			filters["label"] = req.LabelKeys
 		}
 
+		if req.Name != "" {
+			filters["name"] = []string{req.Name}
+		}
+
 		resources, err := scoped.ListCRD(ctx, list, filters)
 		if err != nil {
 			return nil, err

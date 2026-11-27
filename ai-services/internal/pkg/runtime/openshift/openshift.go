@@ -393,7 +393,8 @@ func (kc *OpenshiftClient) ContainerLogs(ctx context.Context, containerNameOrID 
 }
 
 // ListCRD populates list resources based on input
-// resources in the client namespace that carry every label key in filters["label"].
+// resources in the client namespace that carry every label key in filters["label"]
+// and, when filters["name"] is set, whose metadata.name equals its first value.
 func (kc *OpenshiftClient) ListCRD(ctx context.Context, list *unstructured.UnstructuredList, filters map[string][]string) ([]types.CRDResource, error) {
 	labelKeys := []string{}
 	if labelFilters, exists := filters["label"]; exists {
@@ -403,6 +404,10 @@ func (kc *OpenshiftClient) ListCRD(ctx context.Context, list *unstructured.Unstr
 	opts := []client.ListOption{
 		client.InNamespace(kc.Namespace),
 		client.HasLabels(labelKeys),
+	}
+
+	if names := filters["name"]; len(names) > 0 {
+		opts = append(opts, client.MatchingFields{"metadata.name": names[0]})
 	}
 
 	if err := kc.Client.List(ctx, list, opts...); err != nil {

@@ -6,15 +6,9 @@ import (
 	"fmt"
 	"io/fs"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // DeployFunc is the work function for a single item: receives its ID and returns an error.
@@ -86,53 +80,9 @@ func RunConcurrently(
 	return nil
 }
 
-// WaitForInferenceServiceReady polls the named KServe InferenceService until its Ready condition
-// is True, or ctx is done. A missing InferenceService is treated as ready, as there is nothing to
-// wait for. rt must be scoped to the namespace the InferenceService was installed in.
-func WaitForInferenceServiceReady(ctx context.Context, rt runtime.Runtime, isvcName string) error {
-	for {
-		list := &unstructured.UnstructuredList{}
-		list.SetGroupVersionKind(schema.GroupVersionKind{
-			Group:   "serving.kserve.io",
-			Version: "v1beta1",
-			Kind:    "InferenceServiceList",
-		})
-
-		isvcs, err := rt.ListCRD(ctx, list, nil)
-		if err != nil {
-			return fmt.Errorf("failed to get InferenceService %q: %w", isvcName, err)
-		}
-
-		if inferenceServiceReady(isvcs, isvcName) {
-			logger.InfofCtx(ctx, "InferenceService %q is ready\n", isvcName)
-
-			return nil
-		}
-
-		logger.InfofCtx(ctx, "InferenceService %q not ready yet, retrying in %s\n", isvcName, constants.IsvcPollInterval)
-
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timed out waiting for InferenceService %q to become ready: %w", isvcName, ctx.Err())
-		case <-time.After(constants.IsvcPollInterval):
-		}
-	}
-}
-
-// inferenceServiceReady reports whether the InferenceService isvcName is Ready, or absent from isvcs.
-func inferenceServiceReady(isvcs []runtimeTypes.CRDResource, isvcName string) bool {
-	for _, isvc := range isvcs {
-		if isvc.Name == isvcName {
-			return isvc.Ready
-		}
-	}
-
-	return true
-}
-
 // ChartHasInferenceService reports whether any template file under catalogPath
 // in fsys declares a KServe InferenceService (i.e. contains "kind: InferenceService").
-// It is used to decide whether WaitForInferenceServiceReady must be called after
+// It is used to decide whether the InferenceService readiness wait must run after
 // a Helm install — Helm marks an InferenceService "Current" as soon as the CRD is
 // accepted, but KServe only sets Ready=True once the predictor pod is fully up.
 func ChartHasInferenceService(fsys fs.FS, catalogPath string) bool {

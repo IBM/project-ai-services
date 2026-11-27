@@ -53,6 +53,7 @@ func TestWaitForInferenceService_WaitsForInferenceService(t *testing.T) {
 
 		require.NoError(t, WaitForInferenceService(context.Background(), rt, fsys, "chart", "llm"))
 		assert.True(t, rt.listed)
+		assert.Equal(t, map[string][]string{"name": {"llm"}}, rt.filters, "only the named InferenceService is listed")
 	})
 
 	t.Run("not ready", func(t *testing.T) {
@@ -78,10 +79,15 @@ func TestWaitForInferenceService_WaitsForInferenceService(t *testing.T) {
 		assert.Contains(t, err.Error(), "timed out waiting for InferenceService")
 	})
 
-	t.Run("missing InferenceService is treated as ready", func(t *testing.T) {
+	t.Run("missing InferenceService is not ready", func(t *testing.T) {
 		rt := &failingWaitRuntime{Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift)}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
 
-		require.NoError(t, WaitForInferenceService(context.Background(), rt, fsys, "chart", "llm"))
+		err := WaitForInferenceService(ctx, rt, fsys, "chart", "llm")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out waiting for InferenceService")
 	})
 }
 
@@ -141,11 +147,13 @@ type failingWaitRuntime struct {
 	runtime.Runtime
 	listErr error
 	listed  bool
+	filters map[string][]string
 	crds    []runtimeTypes.CRDResource
 }
 
-func (f *failingWaitRuntime) ListCRD(context.Context, *unstructured.UnstructuredList, map[string][]string) ([]runtimeTypes.CRDResource, error) {
+func (f *failingWaitRuntime) ListCRD(_ context.Context, _ *unstructured.UnstructuredList, filters map[string][]string) ([]runtimeTypes.CRDResource, error) {
 	f.listed = true
+	f.filters = filters
 
 	return f.crds, f.listErr
 }
