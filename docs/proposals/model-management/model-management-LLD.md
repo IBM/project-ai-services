@@ -2799,9 +2799,32 @@ ai-services model list --status Running --runtime podman
 ai-services model info [name] --runtime podman
 ```
 
+`[name]` is the model name. The CLI resolves it to the model ID with `GET /api/v1/models?q=<name>` (case-insensitive exact match on the name, following pagination), then calls `GET /api/v1/models/:id`. It exits with `model with name '<name>' not found` when there is no match.
+
 ```bash
 ai-services model info granite-llm --runtime podman
 ```
+
+```
+Name:               granite-llm
+ID:                 7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f
+Type:               Large Language Model (LLM)
+Deployment Type:    local
+Provider:           vLLM (Spyre)
+Model:              ibm-granite/granite-3.3-8b-instruct
+Worker:             lpar-1 (podman)
+Status:             Running
+Message:            Model running
+Connected Services: 1
+Created At:         2026-07-01T10:00:00Z
+Updated At:         2026-07-01T10:05:00Z
+Endpoints:
+  - external: https://<gateway-host>/litellm
+Applications:
+  - my-rag-app
+```
+
+Empty values print as `-`. `Worker` is `-` for remote models and for local models on the control-plane Podman socket. `Parameters` is shown only when the model has non-secret params, `Applications` only when at least one application uses the model, and endpoints with no URL are omitted.
 
 ---
 

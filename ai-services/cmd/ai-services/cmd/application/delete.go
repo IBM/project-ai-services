@@ -2,9 +2,7 @@ package application
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -170,55 +168,23 @@ func deleteApplication(ctx context.Context, appName string) error {
 
 	// Poll to verify deletion is complete
 	logger.Infof("Waiting for application %s to be deleted...\n", appName)
-	if err := waitForApplicationDeletion(ctx, appClient, app.ID); err != nil {
+	err = cliUtils.WaitForDeletion(ctx, "Application", func(ctx context.Context) error {
+		a, err := appClient.GetApplication(ctx, app.ID)
+		if err != nil {
+			return err
+		}
+
+		logger.Infof("Application status: %s, message: %s\n", a.Status, a.Message)
+
+		return nil
+	})
+	if err != nil {
 		return fmt.Errorf("failed to verify application deletion: %w", err)
 	}
 
 	logger.Infof("Application %s deleted successfully.", appName)
 
 	return nil
-}
-
-// waitForApplicationDeletion polls the application status until it's fully deleted.
-func waitForApplicationDeletion(ctx context.Context, appClient *catalogClient.ApplicationClient, appID string) error {
-	const (
-		pollInterval = 5 * time.Second
-		maxAttempts  = 12
-	)
-
-	timer := time.NewTimer(pollInterval)
-	defer timer.Stop()
-
-	for range maxAttempts {
-		// Check if application still exists via API
-		app, err := appClient.GetApplication(ctx, appID)
-		if err != nil {
-			// Check if it's an HTTPError with 404 status code
-			var httpErr *catalogClient.HTTPError
-			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
-				// Application not found (HTTP 404) - successfully deleted
-				return nil
-			}
-
-			return fmt.Errorf("failed to fetch application: %w", err)
-		}
-
-		// If application exists, check its status
-		if app != nil {
-			logger.Infof("Application status: %s, message: %s\n", app.Status, app.Message)
-			// Application still exists, continue polling
-		}
-
-		// Wait before next poll, but honour context cancellation
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-			timer.Reset(pollInterval)
-		}
-	}
-
-	return fmt.Errorf("timeout waiting for application deletion after %v", maxAttempts*pollInterval)
 }
 
 func deleteConfirmation() (bool, error) {

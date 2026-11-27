@@ -2,7 +2,9 @@ package utils
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -13,6 +15,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+)
+
+// Deletion polling settings; variables so that tests can shorten them.
+var (
+	deletionPollInterval = 5 * time.Second
+	deletionMaxAttempts  = 12
 )
 
 // FetchApplications retrieves either all applications or a specific application by name.
@@ -165,4 +173,37 @@ func ConfirmUninstall(ctx context.Context, pods []types.Pod, autoYes bool) (bool
 	}
 
 	return true, nil
+}
+
+// ResourceFetcher fetches a resource from the catalog. A nil error means the resource still exists.
+// The fetcher is also the place to report progress (log or spinner update) on each poll.
+type ResourceFetcher func(ctx context.Context) error
+
+// WaitForDeletion polls the resource until the catalog reports it as not found (HTTP 404).
+// The kind (e.g. "Application", "Model") is used in error messages.
+func WaitForDeletion(ctx context.Context, kind string, fetch ResourceFetcher) error {
+	timer := time.NewTimer(deletionPollInterval)
+	defer timer.Stop()
+
+	for range deletionMaxAttempts {
+		if err := fetch(ctx); err != nil {
+			// Not found (HTTP 404) means the resource is successfully deleted.
+			var httpErr *catalogClient.HTTPError
+			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+				return nil
+			}
+
+			return fmt.Errorf("failed to fetch %s: %w", strings.ToLower(kind), err)
+		}
+
+		// Resource still exists, wait before next poll, but honour context cancellation.
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			timer.Reset(deletionPollInterval)
+		}
+	}
+
+	return fmt.Errorf("timeout waiting for %s deletion after %v", strings.ToLower(kind), time.Duration(deletionMaxAttempts)*deletionPollInterval)
 }

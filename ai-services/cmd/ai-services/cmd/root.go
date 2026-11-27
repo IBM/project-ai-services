@@ -9,6 +9,7 @@ import (
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/application"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/model"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/mustgather"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/worker"
@@ -50,4 +51,5 @@ func init() {
 	RootCmd.AddCommand(catalog.CatalogCmd())
 	RootCmd.AddCommand(mustgather.MustGatherCmd())
 	RootCmd.AddCommand(worker.WorkerCmd())
+	RootCmd.AddCommand(model.ModelCmd())
 }
