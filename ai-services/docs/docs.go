@@ -4218,6 +4218,9 @@ const docTemplate = `{
                 "runtime_type": {
                     "type": "string"
                 },
+                "status": {
+                    "type": "string"
+                },
                 "worker_name": {
                     "type": "string"
                 }

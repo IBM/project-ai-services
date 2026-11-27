@@ -501,6 +501,8 @@ definitions:
         type: string
       runtime_type:
         type: string
+      status:
+        type: string
       worker_name:
         type: string
     type: object
