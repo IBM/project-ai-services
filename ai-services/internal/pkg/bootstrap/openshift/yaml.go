@@ -168,9 +168,33 @@ func handleSubscriptionPostApply(ctx context.Context, c *openshift.OpenshiftClie
 		return fmt.Errorf("operator %s not ready: %w", packageName, err)
 	}
 
+	updateCachedSubscription(ctx, c, packageName, namespace)
+
 	s.Stop(fmt.Sprintf("%s is up and ready", operatorLabel))
 
 	return nil
+}
+
+// updateCachedSubscription updates the in-memory subscription cache with the newly active subscription.
+func updateCachedSubscription(ctx context.Context, c *openshift.OpenshiftClient, packageName, namespace string) {
+	if cachedSubscriptionList == nil {
+		return
+	}
+
+	sub, err := fetchSubscriptionByPackage(ctx, c, packageName, namespace)
+	if err != nil || sub == nil {
+		return
+	}
+
+	for i := range cachedSubscriptionList.Items {
+		if cachedSubscriptionList.Items[i].Spec.Package == packageName {
+			cachedSubscriptionList.Items[i] = *sub
+
+			return
+		}
+	}
+
+	cachedSubscriptionList.Items = append(cachedSubscriptionList.Items, *sub)
 }
 
 // getPreviousInstalledCSV looks up the previously installed CSV from the cached subscription list.
@@ -214,24 +238,37 @@ func handleExistingSubscription(ctx context.Context, c *openshift.OpenshiftClien
 		return true, nil
 	}
 
-	csvReady := isCSVReady(ctx, c, sub)
+	if !isCSVReady(ctx, c, sub) {
+		s.Stop(fmt.Sprintf("%s is not in a ready state, skipping upgrade check", operatorLabel))
 
-	if !skipUpgrade && csvReady {
-		// promptAndUpgrade returns true when an upgrade was confirmed —
-		// in that case the caller should NOT skip so waitForOperator picks up the new CSV.
-		applied, err := promptAndUpgrade(sub, object, operatorLabel, s)
-		if err != nil {
+		return true, nil
+	}
+
+	if skipUpgrade {
+		s.Stop(fmt.Sprintf("%s is already installed and ready", operatorLabel))
+
+		return true, nil
+	}
+
+	// promptAndUpgrade returns (true, nil) when an upgrade was confirmed —
+	// in that case the caller should NOT skip so waitForOperator picks up the new CSV.
+	applied, err := promptAndUpgrade(sub, object, operatorLabel, s)
+	if err != nil {
+		return false, err
+	}
+	if !applied {
+		return true, nil
+	}
+
+	// Spyre operator does not support in-place auto-upgrade.
+	// Reinstall by tearing down existing SpyreClusterPolicy, CSV, and Subscription.
+	if sub.Spec.Package == constants.SpyreOperatorPackage {
+		if err := reinstallSpyreOperator(ctx, c, sub, s); err != nil {
 			return false, err
 		}
-
-		return !applied, nil
 	}
 
-	if csvReady {
-		s.Stop(fmt.Sprintf("%s is already installed and ready", operatorLabel))
-	}
-
-	return true, nil
+	return false, nil
 }
 
 // shouldSkipSubscription checks if a subscription should be skipped because it already exists.
