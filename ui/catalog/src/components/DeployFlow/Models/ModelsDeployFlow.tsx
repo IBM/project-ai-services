@@ -330,26 +330,27 @@ export const ModelsDeployFlow = ({
           refetchWorkers={refetchWorkers}
         />
       )}
-      {state.currentStep === STEP_TWO && !isRemote && (
-        <ModelsStepTwo
-          title="Configure model"
-          modelId={state.selectedModelId ?? ""}
-          modelName={selectedModel?.name ?? ""}
-          modelDescription={selectedModel?.description ?? ""}
-          componentType={selectedModel?.component_type.short_name ?? ""}
-          deploymentType={state.formData.deploymentType}
-          workerName={state.formData.workerName}
-          config={{
-            inferenceBackendId: state.inferenceBackendId,
-            resourceProfileId: state.resourceProfileId,
-            params: state.params,
-          }}
-          onApply={handleApplyConfig}
-          onEditingChange={handleEditingChange}
-          onResourceStatusChange={handleResourceStatusChange}
-          onValidityChange={setIsConfigValid}
-        />
-      )}
+      {state.currentStep === STEP_TWO &&
+        state.formData.deploymentType !== REMOTE_RUNTIME && (
+          <ModelsStepTwo
+            title="Configure model"
+            modelId={state.selectedModelId ?? ""}
+            modelName={selectedModel?.name ?? ""}
+            modelDescription={selectedModel?.description ?? ""}
+            componentType={selectedModel?.component_type.short_name ?? ""}
+            deploymentType={state.formData.deploymentType}
+            workerName={state.formData.workerName}
+            config={{
+              inferenceBackendId: state.inferenceBackendId,
+              resourceProfileId: state.resourceProfileId,
+              params: state.params,
+            }}
+            onApply={handleApplyConfig}
+            onEditingChange={handleEditingChange}
+            onResourceStatusChange={handleResourceStatusChange}
+            onValidityChange={setIsConfigValid}
+          />
+        )}
     </DeployTearsheetShell>
   );
 };

@@ -46,7 +46,8 @@ interface ModelsStepTwoProps {
   modelName: string;
   modelDescription: string;
   componentType: string;
-  deploymentType: DeploymentRuntimeType;
+  // Remote has no Configure model step and isn't a valid runtime query param
+  deploymentType: Exclude<DeploymentRuntimeType, "remote">;
   workerName: string;
   config: ModelConfig;
   onApply: (config: ModelConfig) => void;
