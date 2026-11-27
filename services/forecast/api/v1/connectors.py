@@ -77,15 +77,6 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
     """Create the single connector and queue its first training job."""
     connector_id = str(body.id)
     details = body.connection_details.model_dump(exclude_none=True)
-    # Without a usable key the secrets cannot be stored. The request is still answered with 201: the
-    # connector is stored as FAILED, without its secrets, and the message tells why. A connector
-    # that already exists is checked first, so it is answered with 409 whatever the key.
-    try:
-        encrypted: Optional[dict] = encrypt_secrets(details)
-        key_error = None
-    except EncryptionKeyError as exc:
-        logger.error(f"Connector {connector_id} cannot be accepted: {exc}")
-        encrypted, key_error = None, str(exc)
 
     accepted = False
     with handle_database_errors("creating", connector_id), get_db_session() as session:
@@ -96,19 +87,25 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
         elif connectors_db.connector_exists(session):
             logger.warning(f"Create of connector {connector_id} rejected: a connector already exists")
             APIError.raise_error(ErrorCode.RESOURCE_CONFLICT, CONNECTOR_EXISTS_MESSAGE)
-        elif key_error is not None:
-            logger.warning(f"Create of connector {connector_id} not accepted: {key_error}")
-            connectors_db.insert_failed_connector(
-                session,
-                connector_id=connector_id,
-                name=body.name,
-                connector_type=body.type,
-                config=safe_connection_details(details),
-                message=key_error,
-            )
         else:
-            _insert_accepted(session, body, connector_id, encrypted)
-            accepted = True
+            # Without a usable key the secrets cannot be stored. The request is still answered with 201: the
+            # connector is stored as FAILED, without its secrets, and the message tells why. A connector
+            # that already exists is checked first, so it is answered with 409 whatever the key.
+            try:
+                encrypted = encrypt_secrets(details)
+            except EncryptionKeyError as exc:
+                logger.error(f"Connector {connector_id} cannot be accepted: {exc}")
+                connectors_db.insert_failed_connector(
+                    session,
+                    connector_id=connector_id,
+                    name=body.name,
+                    connector_type=body.type,
+                    config=safe_connection_details(details),
+                    message=str(exc),
+                )
+            else:
+                _insert_accepted(session, body, connector_id, encrypted)
+                accepted = True  # Only an accepted connector gets a scheduled training.
 
     if not accepted:
         return ConnectorCreateResponse(id=connector_id)
