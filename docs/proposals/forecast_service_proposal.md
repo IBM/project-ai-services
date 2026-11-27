@@ -459,7 +459,7 @@ A connector stores the connection details of one source database, with its secre
 |:------------|:-------------------------------------------|:--------------------------------------------------|:-----------------------------------------------------------------------------|:--------------------------|
 | `db2_for_i` | `host`, `database`, `username`, `password` | `port`, `ignore_secure_connection`, `certificate` | `host`, `port`, `database`, `username`, `ignore_secure_connection`           | `password`, `certificate` |
 
-For `db2_for_i`, `certificate` is the PEM certificate that the server's TLS certificate is verified against, and `ignore_secure_connection` (a JSON boolean, `false` by default) turns the verification off. When both are set, `ignore_secure_connection` wins. `ignore_secure_connection` is not a secret, so `GET /v1/connectors` shows whether the verification is off. `certificate` must contain the text `-----BEGIN CERTIFICATE-----` and the text `-----END CERTIFICATE-----` and is at most 65,536 characters. The check is only a first filter: it does not parse the certificate, so a value that holds both markers but is not a valid certificate is stored and fails when the loader uses it.
+For `db2_for_i`, `certificate` is the PEM certificate that the server's TLS certificate is verified against, and `ignore_secure_connection` (a JSON boolean, `false` by default) turns the verification off. Setting both, or neither, is a configuration error (Section 11.1): the API answers `201` and stores the connector as `FAILED` with a message, and no job runs. `ignore_secure_connection` is not a secret, so `GET /v1/connectors` shows whether the verification is off. `certificate` must contain the text `-----BEGIN CERTIFICATE-----` and the text `-----END CERTIFICATE-----` and is at most 65,536 characters. The check is only a first filter: it does not parse the certificate, so a value that holds both markers but is not a valid certificate is stored and fails when the loader uses it.
 
 #### POST /v1/connectors — Create a Connector
 
@@ -528,12 +528,13 @@ The first connector is answered with `201` whether or not it can be accepted: wi
 | New connector: no other connector exists | 201 | Inserted with status `ACCEPTED`. | Row inserted, job `QUEUED`. APScheduler jobs registered: a one-off job that starts the first training at once and, when `schedule` is set, a cron job for the later ones. | Yes, status `ACCEPTED`. |
 | The `id` already exists (a repeated request) | 201 | Not changed. | Not changed. No second job, no second schedule. | The existing connector. |
 | No other connector exists, and `DB_ENCRYPTION_KEY` is missing or not 32 bytes | 201 | Inserted with status `FAILED` and the message "Connector encryption key not found. Ensure the DB_ENCRYPTION_KEY environment variable is set before starting the service." (or the 32-byte message). Only the safe fields are stored: the secrets (the password and the certificate) cannot be encrypted, and they are never stored in plain text. `ignore_secure_connection` is one of the safe fields and is kept. | None. | Yes, status `FAILED` with the message. |
+| No other connector exists, and the TLS settings are invalid: `ignore_secure_connection` is `true` and a `certificate` is set (both), or it is `false` and no `certificate` is set (neither) | 201 | Inserted with status `FAILED` and a message that names the two fields (Section 11.1). Only the safe fields are stored: the password and the certificate are not stored. `ignore_secure_connection` is kept. | None. | Yes, status `FAILED` with the message. |
 | A connector already exists, with any status, `FAILED` included, and the `id` is a new one | 409 `RESOURCE_CONFLICT` | Nothing inserted. The existing connector is not changed. The message says "A connector already exists. Only one connector is supported." | None. | No. The existing connector only. |
 | The lock on the `connectors` table times out | 409 `RESOURCE_LOCKED` | Nothing inserted. | None. | No. |
 | The database pool is exhausted | 429 `SERVER_BUSY` | Nothing inserted. | None. | No. |
 | A database write or the commit fails | 500 `DATABASE_ERROR` | Rolled back, nothing inserted. | None. | No. |
 
-- **Which reason wins.** An existing connector is checked first, then the encryption key. A repeated `id` is answered before either of them.
+- **Which reason wins.** An existing connector is checked first, then the TLS settings, then the encryption key. A repeated `id` is answered before any of them.
 - **One transaction.** The checks and the insert run in one transaction that holds a lock on the `connectors` table, so two requests cannot both pass the single-connector check. A failed write rolls back the whole transaction. Schedules are registered only after the commit.
 - **`FAILED` connectors.** A `FAILED` connector keeps its `connection_details` (with the secrets encrypted, or only the safe fields when `DB_ENCRYPTION_KEY` was unusable), and `status` and `message` give the reason. It counts as a connector: while it exists, every later create with a new `id` is answered with `409`. It has no `training_configs` row and no forecaster, so `POST /v1/forecast` answers `404` for it, and the list endpoints return an empty array. It keeps its `id`: a later create with the same `id` returns `201` without changing the row.
 - **Catalog.** The catalog validates the body before it calls the service, and it treats `201` and `409` as success. The `201` for a connector that is stored as `FAILED` because of the encryption key, and the `409` for a second connector, are therefore both seen as success by the catalog. Only the `status` and `message` of `GET /v1/connectors` tell that the connector is not trained, and the body of the `409` tells that it was not stored.
@@ -541,7 +542,7 @@ The first connector is answered with `201` whether or not it can be accepted: wi
 
 | Status                                | Description                                                                                                                                                       |
 |:--------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 201 Created                           | The request was valid. The connector is accepted, or stored as `FAILED` because `DB_ENCRYPTION_KEY` is unusable, or the `id` already exists.                       |
+| 201 Created                           | The request was valid. The connector is accepted, or stored as `FAILED` because the TLS settings are invalid or `DB_ENCRYPTION_KEY` is unusable, or the `id` already exists. |
 | 409 Conflict (`RESOURCE_CONFLICT`)    | A connector already exists, whatever its status, and the `id` is a new one. Nothing is stored. The catalog treats `409` as success.                                |
 | 409 Conflict (`RESOURCE_LOCKED`)      | The lock on the `connectors` table timed out, or a `PUT` renames a connector to a `name` that is taken. The catalog treats `409` as success.                      |
 | 422 Unprocessable Entity              | The body cannot be parsed: unknown `type`, an `id` that is not a UUID, an unknown field in `connection_details`, or a missing or invalid field in `connection_details` (a `certificate` that lacks the PEM markers or is over 65,536 characters, or an `ignore_secure_connection` that is not a boolean, included) or `service_settings.forecast` (a missing `forecast` group included). Unknown fields in `service_settings` are ignored. Same envelope as every error. |
@@ -653,6 +654,7 @@ Returns `200`, or `404 RESOURCE_NOT_FOUND` when the connector does not exist.
 - A successful update returns `200` with an empty body. An empty request body is a no-op and also returns `200`.
 - The merged details are validated against the type before anything is written. The stored secrets are decrypted for that check. A failure returns `400 INVALID_REQUEST`.
 - Supplied secret fields are encrypted again before they are stored.
+- The merged details must keep exactly one of `certificate` and `ignore_secure_connection: true` (Section 11.1). A `PUT` that would leave both, or neither, returns `400` and changes nothing, so a working connector is never turned into one that cannot connect. To switch modes, send both fields in one request, for example `"certificate": null` with `"ignore_secure_connection": true`. Only a `PUT` that supplies `connection_details` is checked: a rename is not.
 - A new `password` is required when `host`, `port`, `database`, `username` or `ignore_secure_connection` changes, and whenever a `certificate` is supplied (`null` clears it: the key stays stored with the value `null`, which the loader must treat as no certificate). Without it the call returns `400`, so the stored password is never replayed to another target or under a weaker TLS check. A connector stored before these fields existed has `ignore_secure_connection` unset, which counts as `false`.
 - A `PUT` on a `FAILED` connector is accepted when it is valid, but it does not change the status and does not queue a job.
 - A `PUT` that changes `connection_details` needs a usable `DB_ENCRYPTION_KEY`, because the stored secrets are decrypted and the supplied ones are encrypted. Without one it returns `500` and writes nothing. A rename does not need the key.
@@ -1169,6 +1171,65 @@ The OpenShift path uses plain Kubernetes objects, in the way `opensearch` and th
 | `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection for the API (`forecast_metadata`).                                                                                                                                  | —                                |
 | `WORKER_POSTGRES_USER/PASSWORD`       | Credentials of the restricted `forecast_worker` role, passed to the subprocess.                                                                                                         | —                                |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW`    | SQLAlchemy connection pool.                                                                                                                                                             | `5` / `5`                        |
+
+### 11.1 TLS to the Db2 for i source
+
+Mapepire only serves TLS, so the connection to a Db2 for i source is always encrypted. What the connector decides is how the server certificate is checked, with two fields of `connection_details`: `certificate` and `ignore_secure_connection` (boolean, default `false`). They are sent to `POST /v1/connectors` (and may be changed with `PUT /v1/connectors/{id}`) together with `host`, `port`, `database`, `username` and `password`. Nothing is mounted into the service and there is no service-level setting. Exactly one of the two must be chosen, so an insecure connection is never the result of a forgotten field, and a certificate is never silently dropped.
+
+| `ignore_secure_connection` | `certificate` | Result |
+|:--|:--|:--|
+| `false` (or omitted) | **set** (PEM text) | **Custom certificate.** Verifies the chain and the host name against the **system trust store plus** that certificate. The server is authenticated. |
+| `true` | **omitted or `null`** | **No verification.** Sets Mapepire's `ignoreUnauthorized` and skips certificate and host name checks. **No certificate is used at all**: nothing is loaded, not even the system trust store. The service logs an `INSECURE Db2 connection to <host>:<port>` warning on every connection. The server is **not** authenticated. |
+| `false` (or omitted) | omitted or `null` | **Configuration error.** The connector has no certificate and `ignore_secure_connection` is not set. |
+| `true` | **set** | **Configuration error.** The connector sets `ignore_secure_connection` and also has a certificate. |
+
+- **A configuration error is permanent.** `POST /v1/connectors` answers `201` and stores the connector as `FAILED` with a message that names the two fields, so no job runs and nothing falls back to another mode. `PUT` refuses an update that would leave both or neither (Section 6, `400`). The loader repeats the check as a backstop, for a connector stored before the check existed: it fails the job with `DBTLSConfigError` before it opens a connection, and the job is not retried. No message repeats the certificate.
+- The service never fetches or trusts the server's own certificate, so a self-signed server (Mapepire's Option 3) is verified only if its certificate is sent as `certificate`.
+- An empty `certificate` (`""`) or one that is only whitespace is not accepted: the API answers `422`, as for any `certificate` that lacks the PEM markers.
+- A `certificate` that is used must be valid PEM. Otherwise the job fails with `DBTLSConfigError` too. The message never repeats the value. The API only checks the `-----BEGIN CERTIFICATE-----` and `-----END CERTIFICATE-----` markers (Section 6), so a value that has them but is not a valid certificate fails here.
+- A server certificate that does not verify (it is not signed by the `certificate`, its name does not match `host`, or it has expired) also fails the job with `DBTLSConfigError`, and the job is not retried, because trying again cannot change the result. A network error (refused, timeout, closed) is a `DBConnectionError` and is retried.
+- A connector stored before `ignore_secure_connection` existed has neither field set, so its job fails with `DBTLSConfigError` until it is updated with `PUT`. That `PUT` must set one of the two fields.
+- `ignore_secure_connection` is stored in plaintext and returned by `GET`, so a client can see that a connector is not verified. The certificate is never returned.
+- Any other field is rejected as unknown. In particular, `allow_insecure_connection` and `ignore_unauthorized` do not exist.
+
+**Custom certificate (recommended).**
+
+1. On the IBM i, put a certificate in `/QOpenSys/etc/mapepire/cert/server.jks` with format JKS, alias `mapepire`, store password `mapepire` and key password `mapepire`, then restart Mapepire (`sc restart mapepire`). Either export one from the `*SYSTEM` DCM store with [DCM Tools](https://github.com/ThePrez/DCM-tools/) and `keytool -importkeystore`, or create one with `keytool -genkeypair`. See the [Mapepire system administrator guide](https://mapepire-ibmi.github.io/guides/sysadmin/).
+2. Put the name or IP the service will connect to in the certificate's SAN (`-ext "SAN=IP:<ip>,DNS:<name>"` with `keytool`). Python checks the SAN, not the CN, so the connector `host` must be an IP or DNS name listed there.
+3. Send the CA that issued the certificate, or the certificate itself when it is self-signed (`keytool -exportcert -rfc`), as PEM text in `connection_details.certificate`.
+
+**Ignore secure connection.** This is for development and testing. The traffic is still encrypted, but the server is not authenticated, so anyone who can intercept the network can impersonate it and capture the credentials and the data. It must be asked for explicitly with `"ignore_secure_connection": true` and no certificate. To verify the server, replace it later with `PUT` (`"ignore_secure_connection": false` and a `certificate`).
+
+- **The certificate is a value, never a file.** `certificate` is the PEM text itself (the whole `-----BEGIN CERTIFICATE-----` block, newlines as `\n` in JSON). It is a secret field: it is encrypted with `DB_ENCRYPTION_KEY` like the password, stored in `connection_details`, and never returned by the API. Neither its content nor the password is logged.
+- **Update.** `PUT` merges the supplied keys into the stored ones, as described in Section 6. Switching from a certificate to no verification therefore sends `"certificate": null` and `"ignore_secure_connection": true` together, and the reverse sends a `certificate` and `"ignore_secure_connection": false`. A new `password` is required when the flag changes or a `certificate` is supplied, so the stored password is never replayed under a weaker check. A `PUT` that would leave both or neither returns `400` and changes nothing.
+- **TLS version.** The Mapepire server negotiates TLS 1.3, and the client accepts TLS 1.2 or later. The Python in the service image must be built on OpenSSL 1.1.1 or later.
+- **Mutual TLS is not available.** Mapepire does not request client certificates, so the client is authenticated by its IBM i user and password only.
+
+Example, custom certificate:
+
+```json
+"connection_details": {
+  "host": "ibmi.example.com",
+  "port": 8076,
+  "database": "*LOCAL",
+  "username": "forecast_ro",
+  "password": "********",
+  "certificate": "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----\n",
+  "ignore_secure_connection": false
+}
+```
+
+Example, ignore secure connection (development only, Mapepire's own self-signed certificate):
+
+```json
+"connection_details": {
+  "host": "ibmi.example.com",
+  "database": "*LOCAL",
+  "username": "forecast_ro",
+  "password": "********",
+  "ignore_secure_connection": true
+}
+```
 
 ---
 

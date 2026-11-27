@@ -8,6 +8,7 @@ resolution, the Parquet output and the error mapping are checked on their own.
 
 import re
 import ssl
+import warnings
 from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -541,21 +542,45 @@ def test_client_context_manager_closes_connection():
 
 
 @pytest.mark.parametrize(
-    "message, expected",
+    "message, expected, permanent",
     [
-        ("java.sql.SQLNonTransientConnectionException: Password is incorrect.:USER", DBAuthError),
-        ("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed", DBConnectionError),
-        ("[Errno 111] Connection refused", DBConnectionError),
+        ("java.sql.SQLNonTransientConnectionException: Password is incorrect.:USER", DBAuthError, True),
+        ("[Errno 111] Connection refused", DBConnectionError, False),
+        # A certificate that does not verify cannot be fixed by trying again.
+        ("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed", DBTLSConfigError, True),
     ],
 )
 @pytest.mark.usefixtures("no_certificate_probe")
-def test_get_connection_maps_connect_errors(message, expected):
-    """Connect failures are split into authentication and connection errors."""
+def test_get_connection_maps_connect_errors(message, expected, permanent):
+    """Connect failures are split into authentication, certificate and connection errors."""
     client = Db2Client("host", "db", "user", "secret")
     with patch("mapepire_python.connect", side_effect=RuntimeError(message)):
         with pytest.raises(expected) as excinfo:
             client.list_columns("TEST.ORDERS")
+    assert excinfo.value.is_permanent_failure is permanent
     assert "secret" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ssl.SSLCertVerificationError(1, "[SSL: CERTIFICATE_VERIFY_FAILED] self-signed certificate"),
+        ssl.SSLCertVerificationError(1, "Hostname mismatch, certificate is not valid for 'host'."),
+    ],
+    ids=["untrusted", "hostname"],
+)
+@pytest.mark.usefixtures("no_certificate_probe")
+def test_get_connection_treats_a_certificate_failure_as_permanent_whatever_wraps_it(error):
+    """The SSL error is found by type, also when Mapepire re-raises it as another exception."""
+    client = Db2Client("host", "db", "user", "secret")
+    wrapped = RuntimeError("Failed to connect")
+    wrapped.__cause__ = error
+    for raised in (error, wrapped):
+        with patch("mapepire_python.connect", side_effect=raised):
+            with pytest.raises(DBTLSConfigError) as excinfo:
+                client.list_columns("TEST.ORDERS")
+        assert excinfo.value.is_permanent_failure is True
+        assert "secret" not in str(excinfo.value)
 
 
 @pytest.mark.usefixtures("no_certificate_probe")
@@ -593,6 +618,9 @@ def _make_cert(tmp_path, name="test-ca", san_ip=None):
         .not_valid_before(now - timedelta(days=1)).not_valid_after(now + timedelta(days=1))
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
     )
+    # The key identifiers keep the certificate valid under the strict verification of newer Pythons.
+    builder = builder.add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), False)
+    builder = builder.add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()), False)
     if san_ip:
         builder = builder.add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address(san_ip))]), False)
     cert = builder.sign(key, hashes.SHA256())
@@ -682,9 +710,9 @@ def test_ignore_secure_connection_sets_ignore_unauthorized_and_uses_no_certifica
 @pytest.mark.parametrize(
     "certificate, ignore, message",
     [
-        (None, False, "no certificate and ignore_secure_connection is not set"),
-        ("", False, "no certificate and ignore_secure_connection is not set"),
-        ("PEM", True, "sets ignore_secure_connection and also has a certificate"),
+        (None, False, "not both and not neither"),
+        ("", False, "not both and not neither"),
+        ("PEM", True, "not both and not neither"),
     ],
 )
 def test_an_invalid_combination_is_refused_and_never_connects(certificate, ignore, message, ca_pem):
@@ -730,6 +758,23 @@ def test_the_loader_passes_the_certificate_and_the_flag_to_the_client(ca_pem):
     assert verified.certificate == ca_pem and verified._skip_verification is False
 
 
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (True, True), ("true", True), ("True ", True), ("1", True), ("yes", True),
+        (False, False), ("false", False), ("0", False), ("off", False), ("", False), ("  ", False),
+        (None, False),
+    ],
+)
+def test_the_stored_flag_is_parsed_so_that_only_a_clear_yes_skips_verification(value, expected):
+    """A flag stored as text is parsed; anything that is not a clear yes keeps the server verified."""
+    assert loader_module._as_bool(value) is expected
+    client = loader_module._client_from_config(
+        {"host": "h", "database": "d", "username": "u", "password": "p", "ignore_secure_connection": value}
+    )
+    assert client._skip_verification is expected
+
+
 def test_an_old_connector_without_the_flag_does_not_connect_unverified():
     """A stored connector without the flag defaults to false, so without a certificate it is refused."""
     client = loader_module._client_from_config({"host": "h", "database": "d", "username": "u", "password": "p"})
@@ -738,6 +783,106 @@ def test_an_old_connector_without_the_flag_does_not_connect_unverified():
         with pytest.raises(DBTLSConfigError):
             client._get_connection()
     connect.assert_not_called()
+
+
+# --- A real TLS handshake: the client's own context against a local websocket server
+
+
+@pytest.fixture
+def tls_server(tmp_path):
+    """Start a websocket server over TLS on 127.0.0.1; return a function that gives (port, certificate PEM)."""
+    import threading
+
+    from cryptography.hazmat.primitives import serialization
+    from websockets.sync.server import serve
+
+    servers = []
+
+    def start(san_ip="127.0.0.1"):
+        cert_path, key, _ = _make_cert(tmp_path, name=f"server-{san_ip}", san_ip=san_ip)
+        key_path = tmp_path / f"server-{san_ip}.key"
+        key_path.write_bytes(
+            key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+        )
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(cert_path, key_path)
+        server = serve(lambda connection: None, "127.0.0.1", 0, ssl=context)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        return server.socket.getsockname()[1], cert_path.read_text()
+
+    yield start
+    for server in servers:
+        server.shutdown()
+
+
+def _open_websocket(client, port, monkeypatch):
+    """Open the socket through the Mapepire connect that Db2Client patches, with the client's own TLS context."""
+    import mapepire_python.client.websocket_client as mapepire_ws
+
+    connection_class = mapepire_ws.WebsocketConnection
+    monkeypatch.setattr(connection_class, "connect", connection_class.connect)
+    monkeypatch.setattr(connection_class, "_max_size_configured", False, raising=False)
+    with patch("mapepire_python.DaemonServer"), patch("mapepire_python.connect"):
+        client._get_connection()  # installs the patched connect
+    server = SimpleNamespace(ssl_context=client._build_ssl_context(), connect_timeout_s=5)
+    ws = connection_class.connect(SimpleNamespace(db2_server=server, uri=f"wss://127.0.0.1:{port}/db/", headers={}))
+    with warnings.catch_warnings():
+        # websockets 15 and later warn when the result of connect() is used without ``with``,
+        # which is how the Mapepire connect that Db2Client patches uses it.
+        warnings.simplefilter("ignore", DeprecationWarning)
+        ws.close()
+
+
+def test_the_certificate_is_accepted_by_a_real_handshake(tls_server, monkeypatch):
+    """A server whose certificate was sent as the connector's certificate is trusted."""
+    port, pem = tls_server()
+    _open_websocket(Db2Client("127.0.0.1", "db", "user", "secret", certificate=pem), port, monkeypatch)
+
+
+def test_a_different_certificate_is_refused_by_a_real_handshake(tls_server, ca_pem, monkeypatch):
+    """A certificate other than the server's does not make the server trusted."""
+    port, _ = tls_server()
+    client = Db2Client("127.0.0.1", "db", "user", "secret", certificate=ca_pem)
+    with pytest.raises(ssl.SSLCertVerificationError) as excinfo:
+        _open_websocket(client, port, monkeypatch)
+    assert "self-signed" in excinfo.value.verify_message or "unable to get" in excinfo.value.verify_message
+
+
+def test_a_certificate_for_another_host_is_refused_by_a_real_handshake(tls_server, monkeypatch):
+    """The certificate is the right one but does not name the host that was connected to."""
+    port, pem = tls_server(san_ip="127.0.0.2")
+    client = Db2Client("127.0.0.1", "db", "user", "secret", certificate=pem)
+    with pytest.raises(ssl.SSLCertVerificationError) as excinfo:
+        _open_websocket(client, port, monkeypatch)
+    assert "mismatch" in excinfo.value.verify_message.lower()
+
+
+def test_ignore_secure_connection_accepts_any_certificate_in_a_real_handshake(tls_server, monkeypatch):
+    """With the flag the handshake succeeds although the certificate is unknown and names another host."""
+    port, _ = tls_server(san_ip="127.0.0.2")
+    _open_websocket(Db2Client("127.0.0.1", "db", "user", "secret", ignore_secure_connection=True), port, monkeypatch)
+
+
+def test_a_tls_configuration_error_makes_the_orchestrator_stop_retrying(encryption_key, tmp_path):
+    """Through the real loader: a connector with neither field is a PermanentFailure and never connects."""
+    from forecast.errors import PermanentFailure
+    from forecast.orchestrator.source import load_training_data
+
+    details = encrypt_secrets({"host": "h", "database": "d", "username": "u", "password": "secret"})
+    with patch("mapepire_python.connect") as connect:
+        with pytest.raises(PermanentFailure, match="ignore_secure_connection") as excinfo:
+            load_training_data(
+                table="TEST.ORDERS", columns=["ID"], output_path=tmp_path / "o.parquet",
+                connector_id="conn-9", connection_details=details,
+            )
+    connect.assert_not_called()
+    assert isinstance(excinfo.value.__cause__, DBTLSConfigError)
+    assert "secret" not in str(excinfo.value)
 
 
 def test_websocket_always_uses_wss_with_the_client_context(monkeypatch):
@@ -900,7 +1045,7 @@ def test_client_from_config_converts_string_options():
 
 
 def test_client_from_config_uses_settings_defaults():
-    """Missing options fall back to the service settings; no certificate means no verification."""
+    """Missing options fall back to the service settings; there is no certificate and the server is verified."""
     client = loader_module._client_from_config({"host": "h", "database": "d", "username": "u", "password": "p"})
     assert client.port == settings.forecast.mapepire_port
     assert client.connect_timeout == settings.forecast.connector_connect_timeout_s

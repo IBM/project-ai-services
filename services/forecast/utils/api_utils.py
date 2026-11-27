@@ -34,6 +34,30 @@ UNIQUE_VIOLATION = "23505"
 # The certificate is not listed: a supplied certificate always needs a new password (see below).
 PASSWORD_BOUND_FIELDS = ("host", "port", "database", "username", "ignore_secure_connection")
 
+TLS_BOTH_MESSAGE = (
+    "Invalid TLS settings: the connector sets ignore_secure_connection and also has a "
+    "certificate. Provide only one of them."
+)
+TLS_NEITHER_MESSAGE = (
+    "Invalid TLS settings: the connector has no certificate and ignore_secure_connection is "
+    "not set. Provide one of them."
+)
+
+
+def tls_settings_error(details: dict) -> Optional[str]:
+    """Return why the TLS settings of new connection details are invalid, or None when they are valid.
+
+    Exactly one of a certificate and ignore_secure_connection must be chosen. ``details`` come
+    from the validated request, with the fields that were not sent left out.
+    """
+    has_certificate = details.get("certificate") is not None
+    ignores_verification = details.get("ignore_secure_connection", False) is True
+    if has_certificate and ignores_verification:
+        return TLS_BOTH_MESSAGE
+    if not has_certificate and not ignores_verification:
+        return TLS_NEITHER_MESSAGE
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Response formatting
@@ -155,7 +179,8 @@ def merge_connection_details(cid: str, config: dict, supplied: dict) -> dict:
     """Validate the stored details merged with the supplied ones; return the supplied fields encrypted.
 
     Raises INVALID_REQUEST when a kept secret cannot be decrypted, the merged details
-    are invalid, or the host, port, database, username or ignore_secure_connection
+    are invalid (both a certificate and ignore_secure_connection, or neither, included),
+    or the host, port, database, username or ignore_secure_connection
     changes, or a certificate is supplied, without a new password.
     Raises INTERNAL_SERVER_ERROR when DB_ENCRYPTION_KEY is missing or invalid, because the
     service starts without it and secrets can then be neither read nor written.
@@ -191,6 +216,13 @@ def merge_connection_details(cid: str, config: dict, supplied: dict) -> dict:
             ErrorCode.INVALID_REQUEST,
             f"Invalid connection_details: {problems}",
         )
+
+    # A working connector must not be turned into one that cannot connect: refuse the update
+    # and change nothing. (POST stores such a connector as FAILED, but a PUT cannot repair that.)
+    tls_problem = tls_settings_error(merged.model_dump())
+    if tls_problem:
+        logger.warning(f"Update of connector {cid} rejected: {tls_problem}")
+        APIError.raise_error(ErrorCode.INVALID_REQUEST, tls_problem)
 
     # Security check: never replay a stored password to a changed target, identity or TLS trust.
     # A stored connector that predates ignore_secure_connection has it unset, which means false.

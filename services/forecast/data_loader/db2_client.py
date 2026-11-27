@@ -30,6 +30,21 @@ logger = logging.getLogger(__name__)
 _JOB_OPTIONS = {"date format": "iso"}
 
 
+def _is_certificate_failure(exc: BaseException) -> bool:
+    """Tell whether a connect error is the server certificate failing verification.
+
+    Mapepire may re-raise the SSL error as a plain exception, so the text is checked as well
+    as the type, along the whole chain of causes.
+    """
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, ssl.SSLCertVerificationError) or "certificate_verify_failed" in str(exc).lower():
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
 @dataclass
 class ColumnInfo:
     """Metadata for a single database column.
@@ -82,7 +97,8 @@ class Db2Client:
         - ``certificate`` empty and ``ignore_secure_connection`` true: no certificate is used at
           all. Nothing is loaded, not even the system trust store, and Mapepire's
           ``ignoreUnauthorized`` is set.
-        - Any other combination is a configuration error (DBTLSConfigError, raised on connect).
+        - Both, or neither, is a configuration error (DBTLSConfigError, raised on connect). The API
+          already stores such a connector as FAILED, so this is only a backstop.
 
         The server's own certificate is never fetched or trusted by the client.
         """
@@ -110,13 +126,10 @@ class Db2Client:
         With a certificate, DBTLSConfigError is raised when it is not valid PEM. The message
         never shows its content. Both set, or neither, is a DBTLSConfigError too.
         """
-        if self.ignore_secure_connection and self.certificate is not None:
+        # The API stores such a connector as FAILED, so only an old or hand-written one gets here.
+        if self.ignore_secure_connection == (self.certificate is not None):
             raise DBTLSConfigError(
-                "The connector sets ignore_secure_connection and also has a certificate; use only one"
-            )
-        if not self.ignore_secure_connection and self.certificate is None:
-            raise DBTLSConfigError(
-                "The connector has no certificate and ignore_secure_connection is not set"
+                "The connector must have either a certificate or ignore_secure_connection, not both and not neither"
             )
         if self._skip_verification:
             logger.warning(
@@ -227,6 +240,13 @@ class Db2Client:
         except Exception as exc:
             err_str = str(exc).lower()
             logger.error("Db2 connection failure on %s:%s - %s", self.host, self.port, exc)
+            if _is_certificate_failure(exc):
+                # The server answered, but its certificate is not the one the connector trusts
+                # (wrong certificate, host name not in it, expired). Retrying cannot change that.
+                raise DBTLSConfigError(
+                    f"The certificate of Db2 host '{self.host}' was not accepted - {exc}. "
+                    "Check the connector's certificate and host, or use ignore_secure_connection."
+                ) from exc
             if any(kw in err_str for kw in ("password", "auth", "credentials", "not authorized", "user id", "unauthorized")):
                 raise DBAuthError(
                     f"Authentication failed for user '{self.username}' on Db2 host '{self.host}'"
