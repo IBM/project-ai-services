@@ -30,6 +30,7 @@ import (
 	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	k8syaml "sigs.k8s.io/yaml"
 )
 
@@ -547,8 +548,7 @@ func (d *PodmanDeployer) deployServices(ctx context.Context, plan *DeploymentPla
 
 	// The catalog auth settings are the same for every service on this worker, so store them once
 	// in a shared secret that the service pods read, before any of them starts.
-	_, isRemote := d.runtime.(*remoteruntime.RemoteRuntime)
-	if err := deploymentauth.EnsurePodmanCatalogAuthSecret(ctx, d.runtime, isRemote); err != nil {
+	if err := deploymentauth.EnsurePodmanCatalogAuthSecret(ctx, d.runtime, d.isRemoteWorker()); err != nil {
 		return err
 	}
 
@@ -573,6 +573,15 @@ func (d *PodmanDeployer) deployServices(ctx context.Context, plan *DeploymentPla
 	)
 }
 
+// isRemoteWorker reports whether services are deployed to a remote worker, one that reaches the
+// catalog through its own Caddy egress. The local worker is also driven through a RemoteRuntime,
+// but it shares the control plane's network and the gateway registers no egress route for it.
+func (d *PodmanDeployer) isRemoteWorker() bool {
+	rt, ok := d.runtime.(*remoteruntime.RemoteRuntime)
+
+	return ok && !strings.EqualFold(rt.WorkerName(), workerconstants.LocalWorkerName)
+}
+
 // deployService deploys a single service and updates its endpoint in the database.
 func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan, serviceID string, svc *ServicePlan) error {
 	logger.InfofCtx(ctx, "Deploying service %s...\n", serviceID)
@@ -583,11 +592,7 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 		// Don't fail the deployment if status update fails
 	}
 
-	isRemote := false
-	if _, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
-		isRemote = true
-	}
-	if err := deploymentauth.InjectServiceAuthValues(ctx, svc.CatalogID, svc.Values, d.runtimeType, isRemote); err != nil {
+	if err := deploymentauth.InjectServiceAuthValues(ctx, svc.CatalogID, svc.Values, d.runtimeType, d.isRemoteWorker()); err != nil {
 		return fmt.Errorf("failed to inject auth values for service %s: %w", svc.CatalogID, err)
 	}
 
