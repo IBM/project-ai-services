@@ -477,6 +477,35 @@ definitions:
       pagination:
         $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelPSResponse:
+    properties:
+      component_type:
+        type: string
+      deployment_type:
+        type: string
+      id:
+        type: string
+      message:
+        type: string
+      model:
+        type: string
+      name:
+        type: string
+      namespace:
+        type: string
+      pods:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod'
+        type: array
+      provider_id:
+        type: string
+      runtime_type:
+        type: string
+      status:
+        type: string
+      worker_name:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.PropagationError:
     properties:
       error:
@@ -875,6 +904,16 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings:
     properties:
+      allow_connect:
+        description: |-
+          AllowConnect controls whether datasources may be connected after application creation via the connect API.
+          Defaults to true when unset.
+        type: boolean
+      allow_disconnect:
+        description: |-
+          AllowDisconnect controls whether datasources may be disconnected after application creation via the disconnect API.
+          Defaults to false when required is true, and true otherwise.
+        type: boolean
       max_connections:
         description: |-
           MaxConnections is the maximum number of datasources that may be attached to the service at any
@@ -882,8 +921,13 @@ definitions:
           Must be >= 1 when set.
         type: integer
       required:
+        description: Required indicates that at least one datasource must be connected
+          before the application can be used.
         type: boolean
       supported_providers:
+        description: |-
+          SupportedProviders is the list of datasource provider IDs that this service accepts (e.g. "s3", "filesystem").
+          When empty, all providers are accepted.
         items:
           type: string
         type: array
@@ -3199,6 +3243,55 @@ paths:
       security:
       - BearerAuth: []
       summary: Generate a public key for a model
+      tags:
+      - Models
+  /models/{id}/ps:
+    get:
+      description: Retrieves the runtime process and pod status of a model. For deployment_type=local,
+        the pods of the model are returned. For deployment_type=remote, the model
+        exists only as a connector in the Connector DB and has no pods, so only the
+        model details are returned with an empty pods list (no worker is contacted).
+        Accessing a model created by another user returns 403 Forbidden.
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelPSResponse'
+        "400":
+          description: Invalid model ID format
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "403":
+          description: User does not own the model
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Model not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: Worker unreachable (local models only)
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get process and pod status for a model
       tags:
       - Models
   /resources:

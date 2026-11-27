@@ -62,11 +62,6 @@ type Runtime interface {
 	// System information
 	GetSystemInfo(ctx context.Context) (*models.SystemInfo, error)
 
-	// WaitForInferenceServiceReady polls a KServe InferenceService until its
-	// Ready condition is True or the context deadline is exceeded.
-	// Non-OpenShift runtimes return nil immediately (no-op).
-	WaitForInferenceServiceReady(ctx context.Context, isvcName string) error
-
 	// Runtime type identification
 	Type() types.RuntimeType
 }

@@ -111,7 +111,7 @@ func (p *CatalogProvider) buildSingleService(ctx context.Context, serviceID stri
 		// Derive accepts_datasource and copy datasource config from catalog YAML so the UI knows whether to
 		// render a connector picker for this service and which providers are supported.
 		AcceptsDatasource: service.Datasource != nil,
-		Datasource:        service.Datasource,
+		Datasource:        service.Datasource.ResolveDefaults(),
 	}
 
 	// Only add schema if the service has non-empty schema properties
@@ -215,7 +215,7 @@ func (p *CatalogProvider) GetServiceDeployOptions(ctx context.Context, serviceID
 		Components:        components,
 		Resources:         resources,
 		AcceptsDatasource: service.Datasource != nil,
-		Datasource:        service.Datasource,
+		Datasource:        service.Datasource.ResolveDefaults(),
 	}
 
 	// Only add schema if the service has non-empty schema properties.

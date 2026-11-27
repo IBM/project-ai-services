@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/profiles"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -298,3 +299,40 @@ func TestLoadComponentValuesForModel(t *testing.T) {
 }
 
 // Made with Bob
+
+func TestDatasourceLifecycleDefaults(t *testing.T) {
+	yes, no := true, false
+
+	tests := []struct {
+		name           string
+		settings       types.DatasourceSettings
+		wantConnect    bool
+		wantDisconnect bool
+	}{
+		{"unset, optional", types.DatasourceSettings{}, true, true},
+		{"unset, required", types.DatasourceSettings{Required: true}, true, false},
+		{"explicit false, optional", types.DatasourceSettings{AllowConnect: &no, AllowDisconnect: &no}, false, false},
+		{"explicit true, required", types.DatasourceSettings{Required: true, AllowConnect: &yes, AllowDisconnect: &yes}, true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.settings.CanConnect(); got != tt.wantConnect {
+				t.Errorf("CanConnect() = %v, want %v", got, tt.wantConnect)
+			}
+			if got := tt.settings.CanDisconnect(); got != tt.wantDisconnect {
+				t.Errorf("CanDisconnect() = %v, want %v", got, tt.wantDisconnect)
+			}
+
+			resolved := tt.settings.ResolveDefaults()
+			if *resolved.AllowConnect != tt.wantConnect || *resolved.AllowDisconnect != tt.wantDisconnect {
+				t.Errorf("ResolveDefaults() = connect %v, disconnect %v", *resolved.AllowConnect, *resolved.AllowDisconnect)
+			}
+		})
+	}
+
+	var nilSettings *types.DatasourceSettings
+	if nilSettings.ResolveDefaults() != nil {
+		t.Error("ResolveDefaults() on nil should return nil")
+	}
+}

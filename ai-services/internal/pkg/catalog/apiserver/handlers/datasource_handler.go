@@ -11,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -432,7 +433,7 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.datasourceSvc.ConnectDatasourcesToApplication(c.Request.Context(), applicationID, userID, datasourceIDs)
+	resp, err := h.datasourceSvc.ConnectDatasourcesToApplication(c.Request.Context(), applicationID, userID, datasourceIDs, catalogtypes.EnforceAllowConnect)
 	if err != nil {
 		if valErr, ok := err.(*repository.ValidationError); ok {
 			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})

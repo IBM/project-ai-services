@@ -28,7 +28,7 @@ func TestNewHelmManager_LocalRuntime(t *testing.T) {
 	assert.IsType(t, &helmutil.LocalHelmManager{}, got, "a runtime that is not remote uses the local kubeconfig")
 }
 
-func TestWaitForInferenceServiceReady_SkipsChartWithoutInferenceService(t *testing.T) {
+func TestWaitForInferenceService_SkipsChartWithoutInferenceService(t *testing.T) {
 	fsys := fstest.MapFS{
 		"chart/templates/secret.yaml": {Data: []byte("kind: Secret\n")},
 	}
@@ -36,30 +36,58 @@ func TestWaitForInferenceServiceReady_SkipsChartWithoutInferenceService(t *testi
 	// A failing wait would be reported, so a nil error proves the wait was skipped.
 	rt := &failingWaitRuntime{Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift)}
 
-	require.NoError(t, WaitForInferenceServiceReady(context.Background(), rt, fsys, "chart", "llm"))
-	assert.False(t, rt.waited)
+	require.NoError(t, WaitForInferenceService(context.Background(), rt, fsys, "chart", "llm"))
+	assert.False(t, rt.listed)
 }
 
-func TestWaitForInferenceServiceReady_WaitsForInferenceService(t *testing.T) {
+func TestWaitForInferenceService_WaitsForInferenceService(t *testing.T) {
 	fsys := fstest.MapFS{
 		"chart/templates/isvc.yaml": {Data: []byte("kind: InferenceService\n")},
 	}
 
 	t.Run("ready", func(t *testing.T) {
-		rt := &failingWaitRuntime{Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift)}
+		rt := &failingWaitRuntime{
+			Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift),
+			crds:    []runtimeTypes.CRDResource{{Name: "llm", Ready: true}},
+		}
 
-		require.NoError(t, WaitForInferenceServiceReady(context.Background(), rt, fsys, "chart", "llm"))
-		assert.True(t, rt.waited)
-		assert.Equal(t, "llm", rt.isvcName)
+		require.NoError(t, WaitForInferenceService(context.Background(), rt, fsys, "chart", "llm"))
+		assert.True(t, rt.listed)
+		assert.Equal(t, map[string][]string{"name": {"llm"}}, rt.filters, "only the named InferenceService is listed")
 	})
 
 	t.Run("not ready", func(t *testing.T) {
-		rt := &failingWaitRuntime{Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift), err: errors.New("timed out")}
+		rt := &failingWaitRuntime{Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift), listErr: errors.New("api down")}
 
-		err := WaitForInferenceServiceReady(context.Background(), rt, fsys, "chart", "llm")
+		err := WaitForInferenceService(context.Background(), rt, fsys, "chart", "llm")
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `InferenceService "llm" is not ready yet`)
+	})
+
+	t.Run("times out while the InferenceService is not Ready", func(t *testing.T) {
+		rt := &failingWaitRuntime{
+			Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift),
+			crds:    []runtimeTypes.CRDResource{{Name: "llm", Ready: false}},
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := WaitForInferenceService(ctx, rt, fsys, "chart", "llm")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out waiting for InferenceService")
+	})
+
+	t.Run("missing InferenceService is not ready", func(t *testing.T) {
+		rt := &failingWaitRuntime{Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift)}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := WaitForInferenceService(ctx, rt, fsys, "chart", "llm")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out waiting for InferenceService")
 	})
 }
 
@@ -117,21 +145,16 @@ func TestCleanupModelsNamespace(t *testing.T) {
 // failingWaitRuntime wraps the mock runtime to record and fail the calls the helpers make.
 type failingWaitRuntime struct {
 	runtime.Runtime
-	err      error
-	waited   bool
-	isvcName string
-	listErr  error
-	crds     []runtimeTypes.CRDResource
+	listErr error
+	listed  bool
+	filters map[string][]string
+	crds    []runtimeTypes.CRDResource
 }
 
-func (f *failingWaitRuntime) WaitForInferenceServiceReady(_ context.Context, isvcName string) error {
-	f.waited = true
-	f.isvcName = isvcName
+func (f *failingWaitRuntime) ListCRD(_ context.Context, _ *unstructured.UnstructuredList, filters map[string][]string) ([]runtimeTypes.CRDResource, error) {
+	f.listed = true
+	f.filters = filters
 
-	return f.err
-}
-
-func (f *failingWaitRuntime) ListCRD(context.Context, *unstructured.UnstructuredList, map[string][]string) ([]runtimeTypes.CRDResource, error) {
 	return f.crds, f.listErr
 }
 

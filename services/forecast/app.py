@@ -32,7 +32,7 @@ from forecast.api.v1 import connectors, forecast as forecast_routes  # noqa: E40
 from forecast.db.connection import check_db_configured, close_db_connections  # noqa: E402
 from forecast.errors import register_exception_handlers  # noqa: E402
 from forecast.triton_client.triton import triton_url_check  # noqa: E402
-from forecast.utils.encryption import validate_cipher  # noqa: E402
+from forecast.utils.encryption import EncryptionKeyError, validate_cipher  # noqa: E402
 from forecast.utils.http_client import close_client  # noqa: E402
 
 logger = get_logger("forecast_server")
@@ -55,9 +55,12 @@ async def lifespan(app: FastAPI):
     # Triton's user, which is not the API's: directories 0755 and files 0644.
     os.umask(0o022)
 
-    # Fail fast: without a valid key the service cannot store connector secrets, so
-    # the error stops startup instead of surfacing on the first connector request.
-    validate_cipher()
+    # Without a valid key the service cannot store connector secrets. It still starts, so that
+    # POST /v1/connectors can store the connector as FAILED with the reason in its message.
+    try:
+        validate_cipher()
+    except EncryptionKeyError as exc:
+        logger.error(f"{exc} Connectors cannot be accepted until it is fixed.")
     check_db_configured()
 
     # Cap thread limiter to DB pool max capacity so pool exhaustion queues in AnyIO

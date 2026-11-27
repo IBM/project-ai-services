@@ -1,12 +1,14 @@
 package openshift
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
 	routev1 "github.com/openshift/api/route/v1"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func toOpenshiftPodList(pods *corev1.PodList) []types.Pod {
@@ -127,4 +129,29 @@ func toOpenShiftRouteList(routes []routev1.Route) []types.Route {
 	}
 
 	return routeList
+}
+
+func toOpenShiftCRDResource(item *unstructured.Unstructured) types.CRDResource {
+	return types.CRDResource{
+		Name:   item.GetName(),
+		Labels: item.GetLabels(),
+		Ready:  hasReadyCondition(item),
+	}
+}
+
+// hasReadyCondition reports whether the resource has a Ready condition with status True.
+func hasReadyCondition(item *unstructured.Unstructured) bool {
+	conditions, _, _ := unstructured.NestedSlice(item.Object, "status", "conditions")
+	for _, c := range conditions {
+		cond, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		if cond["type"] == "Ready" {
+			return fmt.Sprint(cond["status"]) == "True"
+		}
+	}
+
+	return false
 }

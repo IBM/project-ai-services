@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -23,7 +22,6 @@ import (
 	consts "github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
@@ -33,7 +31,7 @@ import (
 // which is the single method called after a successful deployment. This narrow interface
 // breaks the import cycle between the application_service and repository packages.
 type DatasourceConnector interface {
-	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, policy types.ConnectPolicy) (*apimodels.ConnectDatasourcesResponse, error)
 }
 
 // ValidationError represents a validation error with HTTP status code.
@@ -867,7 +865,8 @@ func (s *ApplicationServiceBase) attachConnectorsPostDeploy(ctx context.Context,
 		return
 	}
 
-	resp, err := s.DatasourceService.ConnectDatasourcesToApplication(ctx, applicationID, userID, datasourceIDs)
+	// Datasources selected at app creation are always attached; allow_connect only restricts the connect API.
+	resp, err := s.DatasourceService.ConnectDatasourcesToApplication(ctx, applicationID, userID, datasourceIDs, types.SkipAllowConnect)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "post-deploy connector attachment failed for application %s: %v", applicationID, err)
 
@@ -1252,49 +1251,15 @@ func (s *ApplicationServiceBase) collectComponentPods(
 }
 
 func loadApplicationPods(ctx context.Context, rt runtime.Runtime, appID string) ([]types.Pod, error) {
-	filteredPod, err := common.FetchFilteredPods(ctx, rt, appID)
+	pods, err := catalogutils.LoadPods(ctx, rt, appID)
 	if err != nil {
 		return nil, err
 	}
-	if len(filteredPod) == 0 {
+	if len(pods) == 0 {
 		return nil, fmt.Errorf("no pod found with given id")
 	}
 
-	appPodList := make([]types.Pod, 0, len(filteredPod))
-
-	for _, pod := range filteredPod {
-		processedPod, err := common.ProcessPod(ctx, rt, pod)
-		if err != nil {
-			return nil, fmt.Errorf("failed to process pod: %w", err)
-		}
-		// ProcessPod returns (nil, nil) when InspectPod fails, so we should skip that pod
-		if processedPod == nil {
-			continue
-		}
-
-		containers := make([]types.PodContainer, 0, len(pod.Containers))
-		for _, container := range processedPod.Containers {
-			containers = append(containers, types.PodContainer{
-				Name:    container.Name,
-				Status:  types.Status(strings.ToLower(processedPod.Status)),
-				Healthy: strings.ToLower(container.Health) == string(consts.Ready),
-			})
-		}
-
-		appPod := types.Pod{
-			PodID:      processedPod.ID,
-			PodName:    processedPod.Name,
-			Status:     types.Status(strings.ToLower(processedPod.Status)),
-			Healthy:    processedPod.Health == string(consts.Ready),
-			Created:    pod.Created.Format(constants.RFC3339WithTimezone),
-			Labels:     pod.Labels,
-			Containers: containers,
-		}
-
-		appPodList = append(appPodList, appPod)
-	}
-
-	return appPodList, nil
+	return pods, nil
 }
 
 // validateForDeletion fetches the application and validates that the requesting

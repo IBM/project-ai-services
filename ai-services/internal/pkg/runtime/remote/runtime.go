@@ -329,21 +329,6 @@ func (r *RemoteRuntime) ListRoutes(ctx context.Context, labelSelector string) ([
 	return routes, nil
 }
 
-// ─── OpenShift-specific operations ───────────────────────────────────────────
-
-// WaitForInferenceServiceReady forwards a KServe InferenceService readiness wait
-// to the remote OpenShift worker. The worker polls the InferenceService until
-// Ready=True or the context deadline is exceeded. The context timeout is
-// authoritative — the worker respects ctx.Done() via the gRPC deadline.
-func (r *RemoteRuntime) WaitForInferenceServiceReady(ctx context.Context, isvcName string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_WAIT_INFERENCE_SERVICE, payload.WaitInferenceService{
-		Namespace: r.namespace,
-		Name:      isvcName,
-	})
-
-	return err
-}
-
 // ─── CRD / namespace / PVC / system operations ────────────────────────────────
 
 // ListCRD forwards a CRD list query to the remote OpenShift worker.
@@ -358,6 +343,7 @@ func (r *RemoteRuntime) ListCRD(ctx context.Context, list *unstructured.Unstruct
 		Version:   gvk.Version,
 		Kind:      gvk.Kind,
 		LabelKeys: labelKeys,
+		Name:      firstOrEmpty(filters["name"]),
 	})
 	if err != nil {
 		return nil, err
@@ -370,7 +356,7 @@ func (r *RemoteRuntime) ListCRD(ctx context.Context, list *unstructured.Unstruct
 
 	result := make([]types.CRDResource, len(items))
 	for i, item := range items {
-		result[i] = types.CRDResource{Name: item.Name, Labels: item.Labels}
+		result[i] = types.CRDResource{Name: item.Name, Labels: item.Labels, Ready: item.Ready}
 	}
 
 	return result, nil
@@ -457,4 +443,13 @@ func unmarshalData(res *workerpb.CommandResult, v any) error {
 	}
 
 	return nil
+}
+
+// firstOrEmpty returns the first element of values, or "" when values is empty.
+func firstOrEmpty(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+
+	return values[0]
 }

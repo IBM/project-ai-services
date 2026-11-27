@@ -488,10 +488,15 @@ func (c *Client) ListRoutes(_ context.Context, labelSelector string) ([]types.Ro
 	return out, nil
 }
 
-// ListCRD implements runtime.Runtime. The mock never has custom resources.
-func (c *Client) ListCRD(_ context.Context, _ *unstructured.UnstructuredList, _ map[string][]string) ([]types.CRDResource, error) {
+// ListCRD implements runtime.Runtime. The mock has no custom resources, except that a lookup by
+// name returns that resource as Ready, so readiness waits (e.g. InferenceService) finish at once.
+func (c *Client) ListCRD(_ context.Context, _ *unstructured.UnstructuredList, filters map[string][]string) ([]types.CRDResource, error) {
 	if err := c.requireOpenShift(); err != nil {
 		return nil, err
+	}
+
+	if names := filters["name"]; len(names) > 0 {
+		return []types.CRDResource{{Name: names[0], Ready: true}}, nil
 	}
 
 	return []types.CRDResource{}, nil
@@ -506,9 +511,6 @@ func (c *Client) DeleteNamespace(_ context.Context, _ string) error {
 func (c *Client) DeletePVCs(_ context.Context, _ string) error {
 	return c.requireOpenShift()
 }
-
-// WaitForInferenceServiceReady implements runtime.Runtime.
-func (c *Client) WaitForInferenceServiceReady(_ context.Context, _ string) error { return nil }
 
 // ─── System ──────────────────────────────────────────────────────────────────
 

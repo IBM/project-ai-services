@@ -70,7 +70,7 @@ func (d *OpenShiftDeployer) Start(ctx context.Context, plan *types.LocalPlan) (t
 	}
 
 	// The chart names its InferenceService after the component type and instance slug.
-	if err := openshiftutils.WaitForInferenceServiceReady(ctx, plan.Runtime, fsys, chartPath, isvcName); err != nil {
+	if err := openshiftutils.WaitForInferenceService(ctx, plan.Runtime, fsys, chartPath, isvcName); err != nil {
 		return types.ModelEndpoints{}, err
 	}
 

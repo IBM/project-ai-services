@@ -94,6 +94,12 @@ def test_check_constraint_names_match_the_schema_file():
     assert model_checks == set(re.findall(r"CONSTRAINT (chk_\w+) CHECK", SCHEMA))
 
 
+def test_connector_status_enum_matches_the_schema_file():
+    check = re.search(r"CONSTRAINT chk_connectors_status CHECK \(status IN \(([^)]*)\)\)", SCHEMA).group(1)
+    assert {value.strip().strip("'") for value in check.split(",")} == {s.value for s in models.ConnectorStatus}
+    assert str(models.ConnectorStatus.FAILED) == "FAILED"
+
+
 def test_index_names_match_the_schema_file():
     model_indexes = {index.name for table in TABLES.values() for index in table.indexes}
     assert model_indexes == set(re.findall(r"CREATE (?:UNIQUE )?INDEX IF NOT EXISTS (\w+)", SCHEMA))

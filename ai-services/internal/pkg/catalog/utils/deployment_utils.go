@@ -82,7 +82,7 @@ func RunConcurrently(
 
 // ChartHasInferenceService reports whether any template file under catalogPath
 // in fsys declares a KServe InferenceService (i.e. contains "kind: InferenceService").
-// It is used to decide whether WaitForInferenceServiceReady must be called after
+// It is used to decide whether the InferenceService readiness wait must run after
 // a Helm install — Helm marks an InferenceService "Current" as soon as the CRD is
 // accepted, but KServe only sets Ready=True once the predictor pod is fully up.
 func ChartHasInferenceService(fsys fs.FS, catalogPath string) bool {

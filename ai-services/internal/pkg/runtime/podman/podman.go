@@ -952,9 +952,3 @@ func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string,
 func (pc *PodmanClient) ExecInContainerWithCmd(_ context.Context, podName, containerName string, cmd []string) (string, error) {
 	return pc.ExecInContainerWithOutput(podName+"-"+containerName, cmd)
 }
-
-// WaitForInferenceServiceReady is a no-op for Podman — KServe InferenceServices
-// are an OpenShift-only concept.
-func (pc *PodmanClient) WaitForInferenceServiceReady(_ context.Context, _ string) error {
-	return nil
-}

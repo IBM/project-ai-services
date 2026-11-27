@@ -2,14 +2,13 @@
 Inference request validation for the Forecast service.
 """
 
-import math
 from typing import Any
 
 from common.error_utils import APIError, ErrorCode
 
 
 def validate_inference_instances(
-    instances: list[dict[str, Any]], input_columns: list[dict], max_rows: int = 5000
+    instances: list[dict[str, Any]], input_columns: list[str], max_rows: int = 5000
 ) -> None:
     """Validate inference instances against the connector's input columns schema.
 
@@ -33,8 +32,7 @@ def validate_inference_instances(
             f"Request row count ({len(instances)}) exceeds maximum allowed inference limit of {max_rows} rows.",
         )
 
-    expected_names = {col["name"] for col in input_columns}
-    type_map = {col["name"]: col.get("type") for col in input_columns}
+    expected_names = set(input_columns)
 
     for i, row in enumerate(instances):
         if not isinstance(row, dict):
@@ -68,44 +66,8 @@ def validate_inference_instances(
                     f"Row {i} column '{col_name}' cannot be null.",
                 )
 
-            expected_type = type_map.get(col_name)
-            if expected_type == "string":
-                if not isinstance(val, str):
-                    APIError.raise_error(
-                        ErrorCode.INVALID_REQUEST,
-                        f"Row {i} column '{col_name}' expected string, got {type(val).__name__}.",
-                    )
-            elif expected_type == "integer":
-                if (
-                    isinstance(val, bool)
-                    or not isinstance(val, int)
-                    or not -(2**63) <= val < 2**63
-                ):
-                    val_repr = str(val)
-                    if len(val_repr) > 50:
-                        val_repr = val_repr[:47] + "..."
-                    APIError.raise_error(
-                        ErrorCode.INVALID_REQUEST,
-                        f"Row {i} column '{col_name}' expected integer (64-bit integer), got {val_repr}.",
-                    )
-            elif expected_type == "number":
-                if (
-                    isinstance(val, bool)
-                    or not isinstance(val, (int, float))
-                    or abs(val) > 3.4028235e38
-                    or not math.isfinite(val)
-                ):
-                    val_repr = str(val)
-                    if len(val_repr) > 50:
-                        val_repr = val_repr[:47] + "..."
-                    APIError.raise_error(
-                        ErrorCode.INVALID_REQUEST,
-                        f"Row {i} column '{col_name}' must be a finite number within single-precision range, got {val_repr}.",
-                    )
-            elif expected_type is None:
-                if isinstance(val, (dict, list, bool)):
-                    APIError.raise_error(
-                        ErrorCode.INVALID_REQUEST,
-                        f"Row {i} column '{col_name}' cannot be complex JSON type {type(val).__name__}.",
-                    )
-
+            if isinstance(val, (dict, list, bool)):
+                APIError.raise_error(
+                    ErrorCode.INVALID_REQUEST,
+                    f"Row {i} column '{col_name}' cannot be complex JSON type {type(val).__name__}.",
+                )

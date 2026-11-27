@@ -184,6 +184,8 @@ type ListCRD struct {
 	Version   string   `json:"version"`
 	Kind      string   `json:"kind"`
 	LabelKeys []string `json:"label_keys,omitempty"`
+	// Name restricts the result to the resource with this metadata.name.
+	Name string `json:"name,omitempty"`
 }
 
 // CRDResource is the wire representation of a single CRD resource returned
@@ -191,6 +193,7 @@ type ListCRD struct {
 type CRDResource struct {
 	Name   string            `json:"name"`
 	Labels map[string]string `json:"labels,omitempty"`
+	Ready  bool              `json:"ready,omitempty"`
 }
 
 // DeleteNamespace is the wire payload for COMMAND_TYPE_DELETE_NAMESPACE.
@@ -204,14 +207,6 @@ type UpdateSecret struct {
 	Name           string            `json:"name"`
 	DeploymentName string            `json:"deployment_name"`
 	Data           map[string][]byte `json:"data"`
-}
-
-// WaitInferenceService is the wire payload for COMMAND_TYPE_WAIT_INFERENCE_SERVICE.
-// The worker polls the named KServe InferenceService in Namespace until its
-// Ready condition is True, or until the caller's context deadline is exceeded.
-type WaitInferenceService struct {
-	Namespace string `json:"namespace"`
-	Name      string `json:"name"`
 }
 
 // CancelCommand is the wire payload for COMMAND_TYPE_CANCEL.

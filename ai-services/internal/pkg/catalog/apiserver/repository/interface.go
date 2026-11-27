@@ -28,6 +28,9 @@ type ModelServiceInterface interface {
 	// returning and the response is nil. A missing model is a *validators.ValidationError with 404,
 	// another user's model one with 403, and a model in use (or already being deleted) one with 409.
 	DeleteModel(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.DeleteModelResponse, error)
+	// GetModelPS returns the process and pod status for a model, local or remote, owned by createdBy.
+	// A missing model is a *validators.ValidationError with 404, and another user's model one with 403.
+	GetModelPS(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.ModelPSResponse, error)
 }
 
 // DatasourceServiceInterface defines the contract for datasource connector business logic.
@@ -35,8 +38,10 @@ type DatasourceServiceInterface interface {
 	// CreateDatasource validates the request, tests the connection, encrypts credentials,
 	// and persists a new datasource connector record.
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
-	// ConnectDatasourcesToApplication links one or more datasource connectors to each eligible service in a running application.
-	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+	// ConnectDatasourcesToApplication links one or more datasource connectors to each eligible service in a
+	// running application. policy controls whether the allow_connect catalog flag is enforced:
+	// pass types.EnforceAllowConnect for the HTTP endpoint, types.SkipAllowConnect for the deploy path.
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, policy types.ConnectPolicy) (*apimodels.ConnectDatasourcesResponse, error)
 	// DisconnectDatasourcesFromApplication removes a single datasource connector from each
 	// eligible service in a running application and removes the service_dependency record.
 	DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceID uuid.UUID) error

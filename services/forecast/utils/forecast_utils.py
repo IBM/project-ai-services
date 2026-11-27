@@ -63,7 +63,7 @@ def validate_version(session: Session, cid: str, version: Optional[int]) -> int:
     return forecaster.version
 
 
-def resolve_default(version: Optional[int]) -> tuple[str, int, list[dict]]:
+def resolve_default(version: Optional[int]) -> tuple[str, int, list[str]]:
     """Return the id, the version to use and the input columns of the default connector.
 
     Blocking (database), so the endpoints call it through ``run_in_threadpool``.
@@ -78,7 +78,7 @@ def resolve_default(version: Optional[int]) -> tuple[str, int, list[dict]]:
         return cid, validate_version(session, cid, version), connector.input_columns or []
 
 
-def resolve_connector(cid: str, version: Optional[int]) -> tuple[int, list[dict]]:
+def resolve_connector(cid: str, version: Optional[int]) -> tuple[int, list[str]]:
     """Return the version to use and the input columns of a connector.
 
     Blocking (database), so the endpoints call it through ``run_in_threadpool``.
@@ -93,7 +93,7 @@ def resolve_connector(cid: str, version: Optional[int]) -> tuple[int, list[dict]
 
 
 async def run_forecast(
-    cid: str, version: int, input_columns: list[dict], instances: list[dict[str, Any]]
+    cid: str, version: int, input_columns: list[str], instances: list[dict[str, Any]]
 ) -> ForecastResponse:
     """Validate the rows, forward them to Triton and return the predictions of the forecaster."""
     validate_inference_instances(

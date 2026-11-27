@@ -89,12 +89,6 @@ class ForecastConfig(BaseSettings):
         description="Wait between two attempts of the same job",
     )
 
-    max_queued_jobs: int = Field(
-        default=10,
-        ge=1,
-        description="Queued jobs accepted before POST /v1/connectors returns 429",
-    )
-
     max_inference_rows: int = Field(
         default=5000,
         ge=1,
