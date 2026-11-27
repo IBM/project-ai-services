@@ -1,5 +1,5 @@
 worker:
-  image: icr.io/ai-services-cicd/ai-services:v0.0.520
+  image: icr.io/ai-services-cicd/ai-services:v0.0.521
   runtime: "podman"
   token: ""
   gatewayAddr: ""

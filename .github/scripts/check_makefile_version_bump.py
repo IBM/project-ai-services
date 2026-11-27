@@ -22,6 +22,7 @@ COMPONENTS = [
     ("services/summarize", "summarize-service"),
     ("services/extract", "extract-service"),
     ("services/translate", "translate-service"),
+    ("services/forecast", "forecast-service"),
     # Images
     ("images/service-base", "service-base"),
     ("images/postgres", "postgres"),

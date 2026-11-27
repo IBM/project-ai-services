@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS training_configs (
     connector_id      UUID        PRIMARY KEY REFERENCES connectors(id) ON DELETE CASCADE,
     source_table      TEXT        NOT NULL,
     target_column     TEXT        NOT NULL,
-    input_columns     JSONB       NOT NULL,  -- [{"name": ..., "type": ...}, ...]
+    input_columns     JSONB       NOT NULL,  -- ["COLUMN_A", "COLUMN_B", ...]
     -- Training cadence as the API receives and returns it. The API turns it into the
     -- cron expression (UTC) when it registers the APScheduler job. NULL: only the
     -- first training runs. Compared in lower case, so the API owns the letter case.
