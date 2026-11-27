@@ -410,32 +410,11 @@ func (kc *OpenshiftClient) ListCRD(ctx context.Context, list *unstructured.Unstr
 	}
 
 	result := make([]types.CRDResource, 0, len(list.Items))
-	for _, item := range list.Items {
-		result = append(result, types.CRDResource{
-			Name:   item.GetName(),
-			Labels: item.GetLabels(),
-			Ready:  isReady(&item),
-		})
+	for i := range list.Items {
+		result = append(result, toOpenShiftCRDResource(&list.Items[i]))
 	}
 
 	return result, nil
-}
-
-// isReady reports whether the resource has a Ready condition with status True.
-func isReady(item *unstructured.Unstructured) bool {
-	conditions, _, _ := unstructured.NestedSlice(item.Object, "status", "conditions")
-	for _, c := range conditions {
-		cond, ok := c.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		if cond["type"] == "Ready" {
-			return fmt.Sprint(cond["status"]) == "True"
-		}
-	}
-
-	return false
 }
 
 // ListRoutes lists routes in the namespace. Pass an empty string to list all routes.
