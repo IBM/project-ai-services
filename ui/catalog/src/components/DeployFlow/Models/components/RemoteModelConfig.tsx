@@ -19,6 +19,7 @@ interface RemoteModelConfigProps {
   config: ModelConfig;
   onApply: (config: ModelConfig) => void;
   onValidityChange: (isValid: boolean) => void;
+  onLoadingChange: (isLoading: boolean) => void;
   showErrors: boolean;
 }
 
@@ -28,6 +29,7 @@ export const RemoteModelConfig: React.FC<RemoteModelConfigProps> = ({
   config,
   onApply,
   onValidityChange,
+  onLoadingChange,
   showErrors,
 }) => {
   const {
@@ -73,6 +75,13 @@ export const RemoteModelConfig: React.FC<RemoteModelConfigProps> = ({
   useEffect(() => {
     onValidityChange(isValid);
   }, [isValid, onValidityChange]);
+
+  // Lets the parent hold Register until the provider settings have loaded
+  const isLoading = optionsLoading || schemaLoading;
+  useEffect(() => {
+    onLoadingChange(isLoading);
+    return () => onLoadingChange(false);
+  }, [isLoading, onLoadingChange]);
 
   if (optionsLoading) {
     return <InlineLoading description="Loading providers..." />;

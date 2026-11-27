@@ -120,6 +120,8 @@ export const ModelsDeployFlow = ({
 
   // True when the applied backend, profile and params are valid
   const [isConfigValid, setIsConfigValid] = useState(false);
+  // True while the remote provider list or settings are loading
+  const [isRemoteConfigLoading, setIsRemoteConfigLoading] = useState(false);
   // Remote field errors show once Register is clicked
   const [showRemoteErrors, setShowRemoteErrors] = useState(false);
 
@@ -187,6 +189,13 @@ export const ModelsDeployFlow = ({
     dispatch({ type: ACTION_TYPES.SET_SELECTED_MODEL, payload: modelId });
   };
 
+  const handleClose = () => {
+    dispatch({ type: ACTION_TYPES.RESET_STATE });
+    setShowRemoteErrors(false);
+    setIsConfigValid(false);
+    onClose();
+  };
+
   const handleSubmit = async () => {
     if (isRemote) {
       const nameValid = isValidModelName(state.formData.name);
@@ -226,20 +235,10 @@ export const ModelsDeployFlow = ({
       },
       onSuccess: () => {
         onSubmit();
-        dispatch({ type: ACTION_TYPES.RESET_STATE });
-        setShowRemoteErrors(false);
-        setIsConfigValid(false);
-        onClose();
+        handleClose();
       },
       fallbackError: "Failed to register model",
     });
-  };
-
-  const handleClose = () => {
-    dispatch({ type: ACTION_TYPES.RESET_STATE });
-    setShowRemoteErrors(false);
-    setIsConfigValid(false);
-    onClose();
   };
 
   const handleWorkerErrorReset = useCallback(
@@ -259,9 +258,11 @@ export const ModelsDeployFlow = ({
 
   const isLastStep = state.currentStep === lastStep;
 
-  // Remote stays enabled so Register can reveal errors
+  // Remote stays enabled so Register can reveal errors, except while its
+  // provider settings are still loading and there is nothing to show yet
   const isPrimaryDisabled =
     (state.currentStep === 0 && !state.selectedModelId) ||
+    (isLastStep && isRemote && isRemoteConfigLoading) ||
     (isLastStep && !isRemote && (state.isEditing || !isConfigValid));
 
   // Going back would discard the unsaved draft in the Configure model card
@@ -335,6 +336,7 @@ export const ModelsDeployFlow = ({
                 }}
                 onApply={handleApplyConfig}
                 onValidityChange={setIsConfigValid}
+                onLoadingChange={setIsRemoteConfigLoading}
                 showErrors={showRemoteErrors}
               />
             ) : undefined
