@@ -410,25 +410,56 @@ func (h *CatalogHandler) GetComponentProviderParams(c *gin.Context) {
 // ListConnectorProviders godoc
 //
 //	@Summary		List connector providers
-//	@Description	Returns registered providers. When type is supplied only that type is returned; omitting it returns all providers across all connector types.
+//	@Description	Returns registered providers. When type is supplied only that type is returned; omitting it returns all providers across all connector types. When service_type is supplied, filters providers compatible with the specified service.
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			type	query		string					false	"Filter by connector type (e.g. 'datasource'). Omit to return all types."
-//	@Success		200		{array}		types.ConnectorResponse	"List of providers"
-//	@Failure		401		{object}	ErrorResponse			"Unauthorized"
-//	@Failure		404		{object}	ErrorResponse			"Connector type not found"
+//	@Param			type			query		string					false	"Filter by connector type (e.g. 'datasource'). Omit to return all types."
+//	@Param			service_type	query		string					false	"Filter by service catalog ID (e.g. 'digitize')"
+//	@Success		200				{array}		types.ConnectorResponse	"List of providers"
+//	@Failure		401				{object}	ErrorResponse			"Unauthorized"
+//	@Failure		404				{object}	ErrorResponse			"Connector type or service not found"
 //	@Router			/connectors [get]
+func (h *CatalogHandler) serviceAllowedProviders(serviceType string) ([]string, bool, int, error) {
+	if serviceType == "" {
+		return nil, false, http.StatusOK, nil
+	}
+
+	svc, err := h.provider.LoadService(serviceType)
+	if err != nil {
+		return nil, false, http.StatusNotFound, fmt.Errorf("service %q not found", serviceType)
+	}
+
+	if svc.Datasource == nil {
+		return nil, true, http.StatusOK, nil
+	}
+
+	return svc.Datasource.SupportedProviders, false, http.StatusOK, nil
+}
+
 func (h *CatalogHandler) ListConnectorProviders(c *gin.Context) {
+	allowed, emptyResult, code, err := h.serviceAllowedProviders(c.Query("service_type"))
+	if err != nil {
+		c.JSON(code, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	if emptyResult {
+		c.JSON(http.StatusOK, []types.ConnectorResponse{})
+
+		return
+	}
+
 	connectorType := c.Query("type")
 
 	var connectors []*types.Connector
 	if connectorType == "" {
 		connectors = h.provider.ListAllConnectors()
 	} else {
-		var err error
-		connectors, err = h.provider.ListConnectors(connectorType)
-		if err != nil {
+		var listErr error
+		connectors, listErr = h.provider.ListConnectors(connectorType)
+		if listErr != nil {
 			c.JSON(http.StatusNotFound, ErrorResponse{
 				Error: fmt.Sprintf("connector type %q not found", connectorType),
 			})
@@ -437,9 +468,11 @@ func (h *CatalogHandler) ListConnectorProviders(c *gin.Context) {
 		}
 	}
 
-	response := make([]types.ConnectorResponse, len(connectors))
-	for i, conn := range connectors {
-		response[i] = types.ToConnectorResponse(conn)
+	response := make([]types.ConnectorResponse, 0, len(connectors))
+	for _, conn := range connectors {
+		if len(allowed) == 0 || slices.Contains(allowed, conn.ID) {
+			response = append(response, types.ToConnectorResponse(conn))
+		}
 	}
 
 	c.JSON(http.StatusOK, response)

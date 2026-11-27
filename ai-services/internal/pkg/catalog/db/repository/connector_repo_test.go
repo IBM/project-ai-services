@@ -47,10 +47,16 @@ func TestBuildWhereClause_SingleFilters(t *testing.T) {
 			expectedArgs: []interface{}{models.ConnectorStatusConnected},
 		},
 		{
-			name:         "provider",
-			filters:      &ConnectorFilters{Provider: "object_storage"},
-			expectedSQL:  " WHERE provider = $1",
-			expectedArgs: []interface{}{"object_storage"},
+			name:         "providers",
+			filters:      &ConnectorFilters{Providers: []string{"object_storage"}},
+			expectedSQL:  " WHERE provider = ANY($1)",
+			expectedArgs: []interface{}{[]string{"object_storage"}},
+		},
+		{
+			name:         "multiple_providers",
+			filters:      &ConnectorFilters{Providers: []string{"object_storage", "file_system"}},
+			expectedSQL:  " WHERE provider = ANY($1)",
+			expectedArgs: []interface{}{[]string{"object_storage", "file_system"}},
 		},
 	}
 
@@ -87,23 +93,23 @@ func TestBuildWhereClause_SearchEscapesWildcards(t *testing.T) {
 // when every filter is set.
 func TestBuildWhereClause_AllFilters(t *testing.T) {
 	where, args := buildWhereClause(&ConnectorFilters{
-		Type:     "datasource",
-		Status:   models.ConnectorStatusOffline,
-		Provider: "file_system",
-		Search:   "abc",
+		Type:      "datasource",
+		Status:    models.ConnectorStatusOffline,
+		Providers: []string{"file_system"},
+		Search:    "abc",
 	})
 
 	assert.True(t, strings.HasPrefix(where, " WHERE "))
 	assert.Contains(t, where, "type = $1")
 	assert.Contains(t, where, "status = $2")
-	assert.Contains(t, where, "provider = $3")
+	assert.Contains(t, where, "provider = ANY($3)")
 	assert.Contains(t, where, "name ILIKE $4")
 	assert.Equal(t, 3, strings.Count(where, " AND "))
 
 	require.Len(t, args, 4)
 	assert.Equal(t, "datasource", args[0])
 	assert.Equal(t, models.ConnectorStatusOffline, args[1])
-	assert.Equal(t, "file_system", args[2])
+	assert.Equal(t, []string{"file_system"}, args[2])
 	assert.Equal(t, "%abc%", args[3])
 }
 

@@ -219,11 +219,12 @@ type DatasourceListResponse struct {
 
 // ListDatasourcesRequest carries validated pagination and filter params for the list endpoint.
 type ListDatasourcesRequest struct {
-	Page     int
-	PageSize int
-	Status   string
-	Provider string
-	Search   string // Optional: case-insensitive substring search on datasource name
+	Page        int
+	PageSize    int
+	Status      string
+	Provider    string
+	ServiceType string // Optional: filter datasources compatible with a service catalog ID
+	Search      string // Optional: case-insensitive substring search on datasource name
 }
 
 // ApplicationDatasourceItem is one entry in the GET /api/v1/applications/:id/datasources list.

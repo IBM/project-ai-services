@@ -211,19 +211,21 @@ func (h *DatasourceHandler) DeleteDatasource(c *gin.Context) {
 // ListDatasources godoc
 //
 //	@Summary		List datasource connectors
-//	@Description	Returns a paginated list of datasource connectors with optional filters by status and provider.
+//	@Description	Returns a paginated list of datasource connectors with optional filters by status, provider, and service compatibility.
 //	@Tags			Datasources
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			page		query		int		false	"Page number (1-indexed)"				default(1)
-//	@Param			page_size	query		int		false	"Number of items per page (max: 100)"	default(20)
-//	@Param			status		query		string	false	"Filter by status: 'connected' or 'offline'"
-//	@Param			provider	query		string	false	"Filter by provider ID (e.g. 'object_storage', 'file_system')"
-//	@Param			q			query		string	false	"Case-insensitive substring search on datasource name"
-//	@Success		200			{object}	models.DatasourceListResponse
-//	@Failure		400			{object}	ErrorResponse	"Invalid query parameters"
-//	@Failure		401			{object}	ErrorResponse	"Unauthorized"
-//	@Failure		500			{object}	ErrorResponse	"Internal Server Error"
+//	@Param			page			query		int		false	"Page number (1-indexed)"				default(1)
+//	@Param			page_size		query		int		false	"Number of items per page (max: 100)"	default(20)
+//	@Param			status			query		string	false	"Filter by status: 'connected' or 'offline'"
+//	@Param			provider		query		string	false	"Filter by provider ID (e.g. 'object_storage', 'file_system')"
+//	@Param			service_type	query		string	false	"Filter by service catalog ID (e.g. 'digitize')"
+//	@Param			q				query		string	false	"Case-insensitive substring search on datasource name"
+//	@Success		200				{object}	models.DatasourceListResponse
+//	@Failure		400				{object}	ErrorResponse	"Invalid query parameters"
+//	@Failure		401				{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404				{object}	ErrorResponse	"Service not found"
+//	@Failure		500				{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/datasources [get]
 func (h *DatasourceHandler) ListDatasources(c *gin.Context) {
 	page, _ := strconv.Atoi(c.Query("page"))
@@ -248,15 +250,22 @@ func (h *DatasourceHandler) ListDatasources(c *gin.Context) {
 	}
 
 	req := models.ListDatasourcesRequest{
-		Page:     page,
-		PageSize: pageSize,
-		Status:   status,
-		Provider: c.Query("provider"),
-		Search:   c.Query("q"),
+		Page:        page,
+		PageSize:    pageSize,
+		Status:      status,
+		Provider:    c.Query("provider"),
+		ServiceType: c.Query("service_type"),
+		Search:      c.Query("q"),
 	}
 
 	resp, err := h.datasourceSvc.ListDatasources(c.Request.Context(), req)
 	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
 		logger.ErrorfCtx(c.Request.Context(), "failed to list datasources: %v", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: "Failed to list datasources",
