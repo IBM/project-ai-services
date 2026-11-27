@@ -33,6 +33,7 @@ func ModelCmd() *cobra.Command {
 	cmdcommon.ConfigurePersistentRuntimeFlag(cmd, &runtimeType)
 
 	cmd.AddCommand(newInfoCmd())
+	cmd.AddCommand(newDeleteCmd())
 
 	return cmd
 }

@@ -55,6 +55,50 @@ func TestModelClient_GetModel(t *testing.T) {
 	assert.Equal(t, "my-app", detail.Applications[0].Name)
 }
 
+func TestModelClient_DeleteModel_Local(t *testing.T) {
+	mc := newTestModelClient(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v1/models/abc", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"id":"abc","status":"Deleting","message":"Undeploy initiated"}`))
+	})
+
+	resp, err := mc.DeleteModel(context.Background(), "abc")
+	require.NoError(t, err)
+
+	require.NotNil(t, resp)
+	assert.Equal(t, "abc", resp.ID)
+	assert.Equal(t, "Undeploy initiated", resp.Message)
+}
+
+func TestModelClient_DeleteModel_Remote(t *testing.T) {
+	mc := newTestModelClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	resp, err := mc.DeleteModel(context.Background(), "abc")
+	require.NoError(t, err)
+
+	assert.Nil(t, resp)
+}
+
+func TestModelClient_DeleteModel_ErrorMapping(t *testing.T) {
+	for _, code := range []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict} {
+		mc := newTestModelClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(`{"error":"nope"}`))
+		})
+
+		_, err := mc.DeleteModel(context.Background(), "abc")
+
+		var httpErr *HTTPError
+		require.True(t, errors.As(err, &httpErr))
+		assert.Equal(t, code, httpErr.StatusCode)
+	}
+}
+
 func TestModelClient_ErrorMapping(t *testing.T) {
 	for _, code := range []int{http.StatusForbidden, http.StatusNotFound} {
 		mc := newTestModelClient(t, func(w http.ResponseWriter, _ *http.Request) {

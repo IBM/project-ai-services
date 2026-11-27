@@ -2,7 +2,9 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strconv"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
@@ -79,6 +81,36 @@ func (c *ModelClient) GetModel(ctx context.Context, id string) (*models.ModelDet
 			StatusCode: resp.StatusCode(),
 			Message:    utils.ParseErrorResponse(resp),
 		}
+	}
+
+	return &result, nil
+}
+
+// DeleteModel deletes a model, local or remote, by ID. A local model is undeployed
+// asynchronously (202) and the accepted response is returned; a remote model is deleted
+// synchronously (204) and a nil response is returned.
+func (c *ModelClient) DeleteModel(ctx context.Context, id string) (*models.DeleteModelResponse, error) {
+	var result models.DeleteModelResponse
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		Delete(fmt.Sprintf(getModelRoute, id))
+	if err != nil {
+		return nil, fmt.Errorf("delete model: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
+	}
+
+	if resp.StatusCode() == http.StatusNoContent || len(resp.Body()) == 0 {
+		return nil, nil //nolint:nilnil // a nil response signals a synchronous (remote) delete
+	}
+
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return nil, fmt.Errorf("decode delete model response: %w", err)
 	}
 
 	return &result, nil
