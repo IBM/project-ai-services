@@ -115,22 +115,25 @@ func (b *ParamBuilder) buildComponentParams(
 ) (*ComponentParams, error) {
 	// Flatten component params with component_type prefix for service-level argParams
 	// Example: llm.model = "granite-3.3-8b-instruct" -> accessible as .Values.llm.model
+	// ValueParams includes the top-level model, so templates still read .Values.<type>.model.
+	valueParams := compReq.ValueParams()
 	prefix := compReq.ComponentType
-	flatParams := utils.FlattenMapWithValues(compReq.Params, prefix)
+	flatParams := utils.FlattenMapWithValues(valueParams, prefix)
 
 	compParams := &ComponentParams{
 		ComponentType: compReq.ComponentType,
 		ProviderID:    compReq.ProviderID,
-		Params:        compReq.Params,
+		Params:        valueParams,
 		ArgParams:     flatParams,
 	}
 
 	// Load component values from values.yaml with argParams applied, then merge the hardware values
-	// of the provider's default profile (e.g. standard 4-card profile on Spyre) on top so templates
-	// render with standard profile values in the application deploy flow.
+	// of the component's profile (e.g. standard 4-card profile on Spyre) on top so templates render
+	// with the values of the profile the model runs with. A component with no profile gets the
+	// provider's default one.
 	// Note: We pass flatParams without prefix since LoadComponentValues expects flat keys
-	componentArgParams := utils.FlattenMapWithValues(compReq.Params, "")
-	values, err := b.catalogProvider.LoadComponentValuesForModel(compReq.ComponentType, compReq.ProviderID, "", "", componentArgParams)
+	componentArgParams := utils.FlattenMapWithValues(valueParams, "")
+	values, err := b.catalogProvider.LoadComponentValuesForModel(compReq.ComponentType, compReq.ProviderID, "", compReq.Profile, componentArgParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load component values: %w", err)
 	}

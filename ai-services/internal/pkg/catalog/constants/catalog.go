@@ -26,6 +26,20 @@ const (
 	ComponentCategoryModels = "models"
 )
 
+// Component param key constants: keys of the params and values maps of a component.
+const (
+	// ParamKeyModel is the key a component's model is carried under, in its params and in the
+	// template values (.Values.model, .Values.<component_type>.model). In the application create
+	// request the model is a top-level field of the component, never a param.
+	ParamKeyModel = "model"
+	// ParamKeyInstanceID is the key that distinguishes a component bound to an existing model
+	// instance (instance_id) in the identity used to deduplicate components.
+	ParamKeyInstanceID = "instance_id"
+	// ParamKeyProfile is the key that distinguishes the hardware profile a model is deployed with
+	// in the identity used to deduplicate components.
+	ParamKeyProfile = "profile"
+)
+
 // Model metadata key constants used when persisting model connector metadata.
 const (
 	// MetadataKeyComponentType is the metadata key that stores the component type of a model connector.
@@ -52,6 +66,12 @@ const (
 	ConnectorParamsURLFormat = "/api/v1/connectors/%s/providers/%s/params"
 	// ComponentParamsURLFormat takes component type, provider ID and runtime.
 	ComponentParamsURLFormat = "/api/v1/components/%s/providers/%s/params?runtime=%s"
+	// CatalogModelsURLFormat takes deployment type and component type; lists the catalog models of
+	// that role that a provider of that deployment type serves.
+	CatalogModelsURLFormat = "/api/v1/catalog/models?deployment_type=%s&component_type=%s"
+	// ModelInstancesURLFormat takes the local and the remote model instance statuses to list. The UI
+	// appends the provider_id and model query parameters of its selection.
+	ModelInstancesURLFormat = "/api/v1/models?status=%s&status=%s"
 )
 
 // Connector type constants.
@@ -102,6 +122,22 @@ const (
 	DatasourceProviderObjectStorage = "object_storage"
 	// DatasourceProviderFileSystem is the provider ID for SSH/SFTP file system connectors.
 	DatasourceProviderFileSystem = "file_system"
+)
+
+// LiteLLM gateway constants: where the services of an application reach the model gateway.
+const (
+	// LiteLLMPodName is the name of the gateway pod on Podman, "<CatalogAppName>--litellm" (see
+	// assets/catalog/podman/templates/litellm.yaml.tmpl). Services on the local worker reach the
+	// gateway by it.
+	LiteLLMPodName = CatalogAppName + "--litellm"
+	// LiteLLMPort is the port the gateway listens on, litellm.port in assets/catalog/podman/values.yaml.
+	LiteLLMPort = "4000"
+	// LiteLLMServiceName is the name of the gateway's Kubernetes service on OpenShift. The service
+	// lives in the catalog namespace (CatalogAppName), while the services of an application run in
+	// their own namespace, so they must reach it by its fully qualified name, LiteLLMServiceHost.
+	LiteLLMServiceName = "litellm"
+	// LiteLLMServiceHost is the cluster-wide DNS name of the gateway's service on OpenShift.
+	LiteLLMServiceHost = LiteLLMServiceName + "." + CatalogAppName + ".svc.cluster.local"
 )
 
 // Catalog name constants.

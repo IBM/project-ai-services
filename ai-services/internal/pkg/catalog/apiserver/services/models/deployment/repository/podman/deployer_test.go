@@ -3,15 +3,101 @@ package podman
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/accelerator"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// freeCardsRuntime is a runtime whose worker reports a number of free Spyre cards; any other
+// method would panic if called.
+type freeCardsRuntime struct {
+	runtime.Runtime
+
+	free int
+}
+
+func (f freeCardsRuntime) FindFreeSpyreCards(context.Context) ([]string, error) {
+	cards := make([]string, f.free)
+	for i := range cards {
+		cards[i] = fmt.Sprintf("0000:00:%02d.0", i)
+	}
+
+	return cards, nil
+}
+
+// newSpyrePlan is a vllm-spyre model plan with the values the planner resolves for it.
+func newSpyrePlan(t *testing.T) *types.LocalPlan {
+	t.Helper()
+
+	provider, err := catalog.NewCatalogProvider(nil)
+	require.NoError(t, err)
+
+	scoped, err := provider.WithRuntime("podman")
+	require.NoError(t, err)
+
+	req := apimodels.CreateModelRequest{
+		ComponentType: "llm",
+		ProviderID:    "vllm-spyre",
+		Model:         "ibm-granite/granite-3.3-8b-instruct",
+		Profile:       "standard",
+	}
+
+	values, err := scoped.LoadComponentValuesForModel(req.ComponentType, req.ProviderID, req.Model, req.Profile, nil)
+	require.NoError(t, err)
+
+	values["model"] = req.Model
+
+	return &types.LocalPlan{ComponentID: uuid.New(), Req: req, Catalog: scoped, Values: values}
+}
+
+func TestPodmanDeployerCheck(t *testing.T) {
+	plan, other := newSpyrePlan(t), newSpyrePlan(t)
+
+	tmpls, err := loadTemplates(plan)
+	require.NoError(t, err)
+
+	each, err := countSpyreCards(t.Context(), plan.Catalog, tmpls, plan.Values)
+	require.NoError(t, err)
+	require.Positive(t, each, "the vllm-spyre profile must need cards for this test to mean anything")
+
+	check := func(free int, plans ...*types.LocalPlan) error {
+		return NewPodmanDeployer(nil).Check(t.Context(), freeCardsRuntime{free: free}, plans)
+	}
+
+	t.Run("a model that fits", func(t *testing.T) {
+		require.NoError(t, check(each, plan))
+	})
+
+	t.Run("a model one card short fails", func(t *testing.T) {
+		var insufficient *accelerator.InsufficientError
+
+		require.ErrorAs(t, check(each-1, plan), &insufficient)
+		assert.Equal(t, accelerator.InsufficientError{Type: accelerator.Spyre, Need: each, Have: each - 1}, *insufficient)
+	})
+
+	t.Run("models that fit alone but not together fail", func(t *testing.T) {
+		require.NoError(t, check(each, plan))
+		require.NoError(t, check(each, other))
+
+		var insufficient *accelerator.InsufficientError
+
+		require.ErrorAs(t, check(each, plan, other), &insufficient)
+		assert.Equal(t, 2*each, insufficient.Need)
+		assert.NoError(t, check(2*each, plan, other))
+	})
+
+	t.Run("no models need nothing", func(t *testing.T) {
+		require.NoError(t, check(0))
+	})
+}
 
 func TestInternalEndpoint(t *testing.T) {
 	plan := &types.LocalPlan{

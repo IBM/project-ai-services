@@ -1,5 +1,8 @@
 name: chat
 version: "1.0.0"
+podTemplateExecutions:
+  - [llm-secret-key.yaml.tmpl, embedding-secret-key.yaml.tmpl]
+  - [chat-bot.yaml.tmpl]
 
 # Resource requirements (UI + Backend)
 resources:

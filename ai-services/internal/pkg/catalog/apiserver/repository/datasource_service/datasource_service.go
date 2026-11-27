@@ -605,7 +605,7 @@ func (s *DatasourceService) validateServiceConstraints(ctx context.Context, link
 			return fmt.Errorf("failed to load catalog service %q: %w", svc.ServiceCatalogID, loadErr)
 		}
 
-		if err := validators.ValidateProviderSupported(catalogSvc, provider, svc.ServiceCatalogID); err != nil {
+		if err := validators.ValidateDatasourceProviderSupported(catalogSvc, provider, svc.ServiceCatalogID); err != nil {
 			return err
 		}
 
@@ -1270,8 +1270,9 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 		return nil, &ValidationError{Code: http.StatusNotFound, Message: "application not found"}
 	}
 
-	// Fetch all connector IDs for this app so we can locate the service base URL.
-	allConnectorIDs, err := s.svcDepRepo.GetConnectorsByAppID(ctx, appID)
+	// Fetch all datasource connector IDs for this app so we can locate the service base URL.
+	// Remote model connectors are linked the same way and must not be picked as the datasource.
+	allConnectorIDs, err := s.svcDepRepo.GetConnectorsByAppID(ctx, appID, catalogconstants.ConnectorTypeDatasource)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list application connectors: %w", err)
 	}

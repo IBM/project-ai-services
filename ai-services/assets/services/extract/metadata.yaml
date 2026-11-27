@@ -14,6 +14,18 @@ dependencies:
 
 standalone: true
 
+# Recommended model profiles (see docs/proposals/model-management/service-model-contracts.md).
+# They only pre-select a profile; every model and profile stays selectable.
+models:
+  - componentType: llm
+    providers:
+      - id: vllm-spyre
+        recommendations:
+          - model: ibm-granite/granite-4.1-8b-fp8
+            profile: compact-4k
+          - model: ibm-granite/granite-3.3-8b-instruct
+            profile: compact-4k
+
 # About field containing detailed service information
 about:
   - title: "Service details"

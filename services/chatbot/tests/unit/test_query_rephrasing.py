@@ -236,7 +236,8 @@ class TestCalculateDynamicMaxResponseTokens:
             llm_endpoint="http://localhost:8000",
             base_max_response_tokens=100,
             multiplier=1.5,
-            system_max_query_length=500
+            system_max_query_length=500,
+            api_key="sk-test"
         )
         
         # 10 * 1.5 = 15, but base is 100, so should return 100
@@ -255,7 +256,8 @@ class TestCalculateDynamicMaxResponseTokens:
             llm_endpoint="http://localhost:8000",
             base_max_response_tokens=100,
             multiplier=1.5,
-            system_max_query_length=500
+            system_max_query_length=500,
+            api_key="sk-test"
         )
         
         # 200 * 1.5 = 300, which is > base (100) and < system_max (500)
@@ -274,7 +276,8 @@ class TestCalculateDynamicMaxResponseTokens:
             llm_endpoint="http://localhost:8000",
             base_max_response_tokens=100,
             multiplier=1.5,
-            system_max_query_length=500
+            system_max_query_length=500,
+            api_key="sk-test"
         )
         
         # 400 * 1.5 = 600, but system_max is 500, so should return 500
@@ -293,7 +296,8 @@ class TestCalculateDynamicMaxResponseTokens:
             llm_endpoint="http://localhost:8000",
             base_max_response_tokens=100,
             multiplier=1.5,
-            system_max_query_length=500
+            system_max_query_length=500,
+            api_key="sk-test"
         )
         
         # Should fallback to base_max_response_tokens
@@ -313,7 +317,8 @@ class TestCalculateDynamicMaxResponseTokens:
             llm_endpoint="http://localhost:8000",
             base_max_response_tokens=50,
             multiplier=1.2,
-            system_max_query_length=500
+            system_max_query_length=500,
+            api_key="sk-test"
         )
         assert result1 == 120  # 100 * 1.2
         
@@ -323,7 +328,8 @@ class TestCalculateDynamicMaxResponseTokens:
             llm_endpoint="http://localhost:8000",
             base_max_response_tokens=50,
             multiplier=2.0,
-            system_max_query_length=500
+            system_max_query_length=500,
+            api_key="sk-test"
         )
         assert result2 == 200  # 100 * 2.0
     
@@ -340,7 +346,8 @@ class TestCalculateDynamicMaxResponseTokens:
             llm_endpoint="http://localhost:8000",
             base_max_response_tokens=100,
             multiplier=2.0,
-            system_max_query_length=500
+            system_max_query_length=500,
+            api_key="sk-test"
         )
         
         # 250 * 2.0 = 500, exactly at system_max

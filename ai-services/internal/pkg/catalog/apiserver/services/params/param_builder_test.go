@@ -47,6 +47,18 @@ func TestBuildComponentParams_DefaultProfile(t *testing.T) {
 		assert.Equal(t, 32768, got.Values["maxModelLen"])
 	})
 
+	t.Run("a component's profile selects the hardware values", func(t *testing.T) {
+		comp := llm(map[string]any{"model": granite33})
+		comp.Profile = "compact-4k"
+
+		got, err := b.buildComponentParams(comp)
+		require.NoError(t, err)
+
+		assert.Equal(t, "compact-4k", got.Values["profile"])
+		assert.Equal(t, 3072, got.Values["maxModelLen"])
+		assert.Equal(t, map[string]any{"ibm.com/spyre_pf": 1}, got.Values["resources"].(map[string]any)["accelerators"])
+	})
+
 	t.Run("component without profiles is unaffected", func(t *testing.T) {
 		got, err := b.buildComponentParams(apimodels.Component{ComponentType: "vector_store", ProviderID: "opensearch", Version: "1.0.0"})
 		require.NoError(t, err)

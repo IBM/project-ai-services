@@ -69,7 +69,7 @@ func models(template string) ([]string, error) {
 // back to the embedded local CatalogProvider.
 // Architecture is tried first, then service — matching the image command behaviour.
 // excludeProviders is forwarded to the API as ?exclude_providers= and to the
-// local provider's exclude list (e.g. "watsonx" during list/download).
+// local provider's exclude list.
 func getCatalogModels(ctx context.Context, templateID string, excludeProviders ...string) ([]string, error) {
 	appClient, err := client.NewApplicationClient(ctx)
 	if err != nil {

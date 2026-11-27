@@ -10,6 +10,9 @@ import sys
 import os
 from pathlib import Path
 
+TEST_INSTANCE_ID = "test-llm-instance-id"
+TEST_API_KEY = "sk-test-key"
+
 # CRITICAL: Set environment variable BEFORE any imports that might use diagnostic_logger
 # This prevents stderr monitoring from starting during test collection
 os.environ['DISABLE_CRASH_HANDLER'] = '1'
@@ -35,6 +38,7 @@ def mock_diagnostic_crash_handler():
 def mock_settings():
     """Mock settings object with default configuration."""
     settings = Mock()
+    settings.common.app.llm_instance_id = TEST_INSTANCE_ID
     settings.max_concurrent_requests = 32
     settings.num_chunks_post_search = 10
     settings.num_chunks_post_reranker = 3
@@ -176,18 +180,14 @@ def mock_vllm_stream():
 
 
 @pytest.fixture
-def mock_models_response():
-    """Mock models list response."""
+def mock_key_info_response():
+    """Mock model gateway /key/info response for a key bound to the test instance."""
     return {
-        "object": "list",
-        "data": [
-            {
-                "id": "test-llm-model",
-                "object": "model",
-                "created": 1234567890,
-                "owned_by": "test"
-            }
-        ]
+        "key": "hashed-key",
+        "info": {
+            "models": ["test-llm-model"],
+            "metadata": {"tags": [TEST_INSTANCE_ID]},
+        },
     }
 
 
@@ -231,13 +231,18 @@ def disable_crash_handler(monkeypatch):
 
 
 @pytest.fixture
-def test_client(monkeypatch, mock_settings, mock_vectorstore, mock_model_dicts):
+def test_client(monkeypatch, mock_settings, mock_vectorstore, mock_model_dicts, mock_key_info_response):
     """
     FastAPI test client with mocked dependencies.
     
     This fixture patches all external dependencies and provides
-    a test client for making requests to the API.
+    a test client for making requests to the API. Requests carry a bearer key
+    that the mocked model gateway accepts for TEST_INSTANCE_ID.
     """
+    monkeypatch.setattr(
+        "chatbot.app.query_gateway_key_info", Mock(return_value=mock_key_info_response)
+    )
+
     # Patch settings
     monkeypatch.setattr("chatbot.app.settings", mock_settings)
     
@@ -253,7 +258,7 @@ def test_client(monkeypatch, mock_settings, mock_vectorstore, mock_model_dicts):
     from chatbot.app import app
     
     # Create test client
-    client = TestClient(app)
+    client = TestClient(app, headers={"Authorization": f"Bearer {TEST_API_KEY}"})
     return client
 
 
@@ -304,10 +309,10 @@ def mock_query_vllm_stream(monkeypatch, mock_vllm_stream):
 
 
 @pytest.fixture
-def mock_query_vllm_models(monkeypatch, mock_models_response):
-    """Mock query_vllm_models function."""
-    mock = Mock(return_value=mock_models_response)
-    monkeypatch.setattr("chatbot.app.query_vllm_models", mock)
+def mock_query_gateway_key_info(monkeypatch, mock_key_info_response):
+    """Mock query_gateway_key_info function."""
+    mock = Mock(return_value=mock_key_info_response)
+    monkeypatch.setattr("chatbot.app.query_gateway_key_info", mock)
     return mock
 
 

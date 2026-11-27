@@ -24,7 +24,7 @@ var (
 
 var templatesCmd = &cobra.Command{
 	Use:   "templates",
-	Short: "Lists the offered application templates and their supported parameters",
+	Short: "Lists the offered application templates, their supported parameters and models",
 	Long:  `Retrieves information about the offered application templates and their supported parameters`,
 	Example: `  For Podman:
   # List all available application templates (Podman)
@@ -32,6 +32,9 @@ var templatesCmd = &cobra.Command{
 
   # List parameters for a specific template (see subcommand)
   ai-services application templates parameters --template digitize --runtime podman
+
+  # List the models of a specific template (see subcommand)
+  ai-services application templates models --template rag --runtime podman
 
   # List templates using legacy implementation
   ai-services application templates --legacy --runtime podman
@@ -41,7 +44,10 @@ var templatesCmd = &cobra.Command{
   ai-services application templates --runtime openshift
 
   # List parameters for a specific template (see subcommand)
-  ai-services application templates parameters --template digitize --runtime openshift`,
+  ai-services application templates parameters --template digitize --runtime openshift
+
+  # List the models of a specific template (see subcommand)
+  ai-services application templates models --template rag --runtime openshift`,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// --runtime is required for templates: listing templates uses the runtime
 		// to filter supported parameter sets.
@@ -121,6 +127,9 @@ func init() {
 
 	// Add parameters subcommand
 	templatesCmd.AddCommand(appTemplates.NewParametersCmd())
+
+	// Add models subcommand
+	templatesCmd.AddCommand(appTemplates.NewModelsCmd())
 }
 
 // listCatalogTemplates lists architectures, services, and components from the catalog.
@@ -158,6 +167,7 @@ func listCatalogTemplates(cmd *cobra.Command) error {
 
 	// Inform user about parameters subcommand
 	logger.Infof("\nTo list supported parameters for each template use: ai-services application templates parameters --template <Template ID> --runtime %s\n", runtimeType)
+	logger.Infof("To list the models that can be chosen for each template use: ai-services application templates models --template <Template ID> --runtime %s\n", runtimeType)
 
 	return nil
 }

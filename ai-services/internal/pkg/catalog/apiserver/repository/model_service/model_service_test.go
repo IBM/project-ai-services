@@ -21,6 +21,7 @@ import (
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -518,7 +519,9 @@ func TestCreateModel_Local_InitialRow(t *testing.T) {
 		mutate      func(*apimodels.CreateModelRequest)
 		wantProfile any
 	}{
-		{name: "minimal request", mutate: func(*apimodels.CreateModelRequest) {}},
+		// Without a profile the default one is resolved and stored, so an application that reuses the
+		// model knows its hardware.
+		{name: "minimal request stores the default profile", mutate: func(*apimodels.CreateModelRequest) {}, wantProfile: "standard"},
 		{name: "request with a profile", mutate: func(r *apimodels.CreateModelRequest) { r.Profile = "standard" }, wantProfile: "standard"},
 	}
 
@@ -566,7 +569,7 @@ type fakeDeployer struct {
 	steps    []string
 }
 
-func (f *fakeDeployer) Check(context.Context, *types.LocalPlan) error {
+func (f *fakeDeployer) Check(context.Context, runtime.Runtime, []*types.LocalPlan) error {
 	return f.checkErr
 }
 
@@ -905,26 +908,28 @@ func TestPlanLocal(t *testing.T) {
 		check  func(t *testing.T, req apimodels.CreateModelRequest, plan *types.LocalPlan)
 	}{
 		{
-			name:   "params and model reach the template values",
-			mutate: func(r *apimodels.CreateModelRequest) { r.Params = map[string]any{"apiKey": "k"} },
+			name:   "model reaches the template values",
+			mutate: func(r *apimodels.CreateModelRequest) {},
 			check: func(t *testing.T, req apimodels.CreateModelRequest, plan *types.LocalPlan) {
-				assert.Equal(t, "k", plan.Values["apiKey"])
 				assert.Equal(t, req.Model, plan.Values["model"], "the requested model must reach the templates as .Values.model")
 				assert.NotEqual(t, uuid.Nil, plan.ComponentID)
 			},
 		},
 		{
-			// The component row keeps the non-sensitive params; credentials only reach the pod via the values.
-			name: "component metadata keeps the profile and strips sensitive params",
-			mutate: func(r *apimodels.CreateModelRequest) {
-				r.Profile = "standard"
-				r.Params = map[string]any{"apiKey": "k"}
-			},
+			name:   "component metadata keeps the model and the profile",
+			mutate: func(r *apimodels.CreateModelRequest) { r.Profile = "standard" },
 			check: func(t *testing.T, req apimodels.CreateModelRequest, plan *types.LocalPlan) {
-				assert.NotContains(t, plan.Metadata, "apiKey", "params are not stored flat")
-				assert.Empty(t, plan.Metadata["params"], "credentials must never be persisted")
 				assert.Equal(t, req.Model, plan.Metadata["model"])
 				assert.Equal(t, "standard", plan.Metadata["profile"])
+			},
+		},
+		{
+			// "standard" is the default of the test model's provider, not a fixed value.
+			name:   "component metadata keeps the model's default profile when none is requested",
+			mutate: func(*apimodels.CreateModelRequest) {},
+			check: func(t *testing.T, _ apimodels.CreateModelRequest, plan *types.LocalPlan) {
+				assert.Equal(t, "standard", plan.Metadata["profile"])
+				assert.Equal(t, "standard", plan.Req.Profile)
 			},
 		},
 		{
@@ -1095,7 +1100,7 @@ type mockSvcDepRepo struct {
 	reads int
 }
 
-func (m *mockSvcDepRepo) GetServiceCountByDependency(context.Context, []uuid.UUID, dbmodels.DependencyType) (map[uuid.UUID]int, error) {
+func (m *mockSvcDepRepo) GetApplicationCountByDependency(context.Context, []uuid.UUID, dbmodels.DependencyType) (map[uuid.UUID]int, error) {
 	m.reads++
 
 	return nil, nil
@@ -1349,4 +1354,258 @@ func TestCreateRemoteModel_HostedVllm_UnusableMaxModelLen(t *testing.T) {
 			assert.Empty(t, conns.connectors)
 		})
 	}
+}
+
+func TestGatewayValues(t *testing.T) {
+	access := types.ModelAccess{
+		ComponentID:   uuid.New(),
+		Model:         "ibm/granite",
+		ApplicationID: uuid.New(),
+		Runtime:       runtimeTypes.RuntimeTypePodman,
+	}
+
+	t.Run("returns the gateway address, the application's key, the tokenize endpoint, the instance id and the component slug", func(t *testing.T) {
+		lite := &mockLiteLLMClient{}
+		svc := NewModelService(nil, nil, nil, nil, nil, setupTestCatalogProvider(t), "")
+		svc.keys = keys.NewManager(lite)
+
+		got, err := svc.GatewayValues(context.Background(), access)
+
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"host":              constants.LiteLLMPodName,
+			"port":              constants.LiteLLMPort,
+			"path":              "",
+			"key":               "sk-test",
+			"tokenize_endpoint": "http://" + constants.LiteLLMPodName + ":" + constants.LiteLLMPort + "/tokenize/" + access.ComponentID.String(),
+			"instance_id":       access.ComponentID.String(),
+			"instanceSlug":      catalogutils.GenerateInstanceSlug(access.ComponentID.String()),
+		}, got)
+		require.Len(t, lite.generatedKeys, 1)
+		assert.Contains(t, lite.generatedKeys[0].KeyAlias, "-app-", "the key is the application's, not the public one")
+		assert.Equal(t, []string{access.ComponentID.String()}, lite.generatedKeys[0].Metadata.Tags)
+	})
+
+	t.Run("a local worker named explicitly reaches the gateway pod", func(t *testing.T) {
+		svc := NewModelService(nil, nil, nil, nil, nil, setupTestCatalogProvider(t), "")
+		svc.keys = keys.NewManager(&mockLiteLLMClient{})
+		local := access
+		local.WorkerName = "local"
+
+		got, err := svc.GatewayValues(context.Background(), local)
+
+		require.NoError(t, err)
+		assert.Equal(t, constants.LiteLLMPodName, got["host"])
+		assert.Equal(t, "", got["path"])
+	})
+
+	t.Run("a remote worker reaches the gateway through its Caddy egress under /litellm", func(t *testing.T) {
+		svc := NewModelService(nil, nil, nil, nil, nil, setupTestCatalogProvider(t), "")
+		svc.keys = keys.NewManager(&mockLiteLLMClient{})
+		remote := access
+		remote.WorkerName = "worker-1"
+
+		got, err := svc.GatewayValues(context.Background(), remote)
+
+		require.NoError(t, err)
+		assert.Equal(t, "ai-services--caddy", got["host"])
+		assert.Equal(t, "8080", got["port"])
+		assert.Equal(t, "/litellm", got["path"])
+		assert.Equal(t, "http://ai-services--caddy:8080/litellm/tokenize/"+access.ComponentID.String(), got["tokenize_endpoint"])
+	})
+
+	t.Run("fails without a model", func(t *testing.T) {
+		svc := NewModelService(nil, nil, nil, nil, nil, setupTestCatalogProvider(t), "")
+		svc.keys = keys.NewManager(&mockLiteLLMClient{})
+		access.Model = ""
+
+		_, err := svc.GatewayValues(context.Background(), access)
+
+		require.Error(t, err)
+	})
+}
+
+// connectorByID is a ConnectorRepository that answers GetByID with a canned row or error.
+type connectorByID struct {
+	dbrepo.ConnectorRepository
+	conn         *dbmodels.Connector
+	err          error
+	gotIncludeCr bool
+}
+
+func (c *connectorByID) GetByID(_ context.Context, _ uuid.UUID, includeCreds bool) (*dbmodels.Connector, error) {
+	c.gotIncludeCr = includeCreds
+
+	return c.conn, c.err
+}
+
+func TestGetConnectedModel(t *testing.T) {
+	id := uuid.New()
+	connected := func() *dbmodels.Connector {
+		return &dbmodels.Connector{
+			ID: id, Type: constants.ConnectorTypeModels, Status: dbmodels.ConnectorStatusConnected, CreatedBy: "alice",
+			Metadata: map[string]any{constants.MetadataKeyComponentType: "llm"},
+		}
+	}
+
+	get := func(repo *connectorByID, createdBy string) (*dbmodels.Connector, error) {
+		svc := NewModelService(nil, repo, nil, nil, nil, setupTestCatalogProvider(t), "")
+
+		return svc.GetConnectedModel(context.Background(), id, createdBy)
+	}
+
+	t.Run("returns a connected model connector of the user, with its metadata", func(t *testing.T) {
+		repo := &connectorByID{conn: connected()}
+
+		got, err := get(repo, "alice")
+
+		require.NoError(t, err)
+		assert.Equal(t, "llm", got.Metadata[constants.MetadataKeyComponentType])
+		assert.True(t, repo.gotIncludeCr, "the metadata is read, which GetByID omits otherwise")
+	})
+
+	t.Run("a missing connector is a 400", func(t *testing.T) {
+		_, err := get(&connectorByID{err: dbrepo.ErrConnectorNotFound}, "alice")
+
+		var valErr *validators.ValidationError
+		require.ErrorAs(t, err, &valErr)
+		assert.Equal(t, http.StatusBadRequest, valErr.Code)
+	})
+
+	t.Run("a repository failure is not a client error", func(t *testing.T) {
+		boom := errors.New("db down")
+
+		_, err := get(&connectorByID{err: boom}, "alice")
+
+		require.ErrorIs(t, err, boom)
+
+		var valErr *validators.ValidationError
+		assert.False(t, errors.As(err, &valErr))
+	})
+
+	t.Run("a connector of another type is a 400", func(t *testing.T) {
+		conn := connected()
+		conn.Type = "datasource"
+
+		_, err := get(&connectorByID{conn: conn}, "alice")
+
+		var valErr *validators.ValidationError
+		require.ErrorAs(t, err, &valErr)
+		assert.Equal(t, http.StatusBadRequest, valErr.Code)
+	})
+
+	t.Run("another user's connector is a 403", func(t *testing.T) {
+		_, err := get(&connectorByID{conn: connected()}, "bob")
+
+		var valErr *validators.ValidationError
+		require.ErrorAs(t, err, &valErr)
+		assert.Equal(t, http.StatusForbidden, valErr.Code)
+	})
+
+	t.Run("a connector that is not connected is a 400", func(t *testing.T) {
+		conn := connected()
+		conn.Status = dbmodels.ConnectorStatusOffline
+
+		_, err := get(&connectorByID{conn: conn}, "alice")
+
+		var valErr *validators.ValidationError
+		require.ErrorAs(t, err, &valErr)
+		assert.Equal(t, http.StatusBadRequest, valErr.Code)
+	})
+}
+
+// failingConnectorRepo answers GetByID with an error for every id, to check that a lookup failure
+// is reported, not skipped.
+type failingConnectorRepo struct {
+	dbrepo.ConnectorRepository
+	err error
+}
+
+func (f *failingConnectorRepo) GetByID(context.Context, uuid.UUID, bool) (*dbmodels.Connector, error) {
+	return nil, f.err
+}
+
+func TestRevokeGatewayKeys(t *testing.T) {
+	appID := uuid.New()
+	slug := catalogutils.GenerateInstanceSlug(appID.String())
+
+	localID, remoteID, datasourceID, otherComponentID, missingID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+
+	comps := newMockComponentRepo()
+	comps.byID[localID] = &dbmodels.Component{ID: localID, Type: "llm", Metadata: map[string]any{constants.MetadataKeyModel: "ibm/granite"}}
+	comps.byID[otherComponentID] = &dbmodels.Component{ID: otherComponentID, Type: "vector_db"}
+
+	conns := &connectorsByID{rows: map[uuid.UUID]*dbmodels.Connector{
+		remoteID:     {ID: remoteID, Type: constants.ConnectorTypeModels, Metadata: map[string]any{constants.MetadataKeyModel: "ibm/embed"}},
+		datasourceID: {ID: datasourceID, Type: constants.ConnectorTypeDatasource},
+	}}
+
+	newSvc := func(lite *mockLiteLLMClient, connRepo dbrepo.ConnectorRepository) *ModelService {
+		svc := NewModelService(comps, connRepo, nil, nil, nil, setupTestCatalogProvider(t), "")
+		svc.keys = keys.NewManager(lite)
+
+		return svc
+	}
+
+	t.Run("revokes the key of each model the application uses, under the alias it was generated with", func(t *testing.T) {
+		lite := &mockLiteLLMClient{}
+
+		err := newSvc(lite, conns).RevokeGatewayKeys(context.Background(), appID,
+			[]uuid.UUID{localID, remoteID, datasourceID, otherComponentID, missingID})
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{
+			"ibm/granite-" + localID.String() + "-app-" + slug,
+			"ibm/embed-" + remoteID.String() + "-app-" + slug,
+		}, lite.deletedKeys, "datasources, other components and rows that are gone have no key")
+	})
+
+	t.Run("the alias is the one GatewayValues generates", func(t *testing.T) {
+		lite := &mockLiteLLMClient{}
+		svc := newSvc(lite, conns)
+
+		_, err := svc.GatewayValues(context.Background(), types.ModelAccess{
+			ComponentID: localID, Model: "ibm/granite", ApplicationID: appID, Runtime: runtimeTypes.RuntimeTypePodman,
+		})
+		require.NoError(t, err)
+
+		lite.deletedKeys = nil
+		require.NoError(t, svc.RevokeGatewayKeys(context.Background(), appID, []uuid.UUID{localID}))
+
+		require.Len(t, lite.generatedKeys, 1)
+		assert.Equal(t, []string{lite.generatedKeys[0].KeyAlias}, lite.deletedKeys)
+	})
+
+	t.Run("no models revokes nothing", func(t *testing.T) {
+		lite := &mockLiteLLMClient{}
+
+		require.NoError(t, newSvc(lite, conns).RevokeGatewayKeys(context.Background(), appID, []uuid.UUID{datasourceID}))
+
+		assert.Empty(t, lite.deletedKeys)
+	})
+
+	t.Run("a lookup failure is reported and revokes nothing", func(t *testing.T) {
+		boom := errors.New("db down")
+		lite := &mockLiteLLMClient{}
+
+		err := newSvc(lite, &failingConnectorRepo{err: boom}).RevokeGatewayKeys(context.Background(), appID, []uuid.UUID{remoteID})
+
+		require.ErrorIs(t, err, boom)
+		assert.Empty(t, lite.deletedKeys)
+	})
+}
+
+// connectorsByID is a ConnectorRepository that answers GetByID from a map, with
+// ErrConnectorNotFound for an id it does not hold.
+type connectorsByID struct {
+	dbrepo.ConnectorRepository
+	rows map[uuid.UUID]*dbmodels.Connector
+}
+
+func (c *connectorsByID) GetByID(_ context.Context, id uuid.UUID, _ bool) (*dbmodels.Connector, error) {
+	if conn, ok := c.rows[id]; ok {
+		return conn, nil
+	}
+
+	return nil, dbrepo.ErrConnectorNotFound
 }

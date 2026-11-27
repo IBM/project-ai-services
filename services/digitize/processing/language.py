@@ -14,6 +14,7 @@ from collections import Counter
 from common.lang_utils import LanguageCodes, detect_language
 from common.llm_utils import tokenize_with_llm
 from common.misc_utils import get_logger
+from common.settings import settings
 
 logger = get_logger("processing.language")
 
@@ -28,7 +29,14 @@ def count_tokens(text, emb_endpoint):
     Returns:
         int: Total token count of the text.
     """
-    token_len = len(tokenize_with_llm(text, emb_endpoint))
+    token_len = len(
+        tokenize_with_llm(
+            text,
+            emb_endpoint,
+            settings.embedding.api_key.get_secret_value(),
+            model_config=settings.embedding,
+        )
+    )
     return token_len
 
 

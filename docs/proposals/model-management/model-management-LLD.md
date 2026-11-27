@@ -201,9 +201,9 @@ Virtual keys are bearer tokens used to authenticate inference requests against t
 
 > **Virtual keys are not stored in the Catalog DB.** There is no `keys` table. LiteLLM is the only system that holds a key. Registering a model route (local deploy or remote connector create) does **not** generate a key.
 
-Every key is tagged with `metadata.type` so the two kinds can be told apart:
+The two kinds of key are told apart by their alias (`<model>-<id>-app-<appSlug>` for internal keys, `public-<model_name>` for public keys):
 
-| `metadata.type` | Used by | Generated | Delivered via | Scope (`metadata.tags`) | How many |
+| Key kind | Used by | Generated | Delivered via | Scope (`metadata.tags`) | How many |
 |---|---|---|---|---|---|
 | `internal` | Service pods of a deployed application | At application create | Podman Secret `litellm-secret-<instance-slug>` (see §9.10) | Exactly one deployment ID (the chosen instance) | One per application and model |
 | `public` | Humans, CI pipelines and scripts calling LiteLLM from outside the platform | On demand, by a user, for a chosen model and deployment(s) — each deployment is a specific worker and profile | Shown **once** in the generate response | One or more deployment IDs, chosen by the user | **At most one per model** |
@@ -219,7 +219,6 @@ Authorization: Bearer <LITELLM_MASTER_KEY>
   "models": ["ibm-granite/granite-3.3-8b-instruct"],
   "duration": null,
   "metadata": {
-    "type": "internal",
     "tags": ["7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"]
   }
 }
@@ -257,7 +256,7 @@ Authorization: Bearer <LITELLM_MASTER_KEY>
 ```
 
 - **Scoped to one model and the chosen deployments.** `"models"` limits the key to that `model_name`; `"metadata.tags"` lists the deployment ID(s) the key may reach, and each ID implies one worker and one profile. With tag filtering enabled, a request made with this key is only eligible for routes whose `litellm_params.tags` contain one of those IDs. A caller may narrow further with request `metadata.tags`, but cannot widen beyond the key's tags.
-- **At most one public key per model.** The alias is `public-<model_name>`, which LiteLLM enforces as unique, and `metadata.type: "public"` identifies the key. Generating a new key for a model always revokes that model's previous public key first, so the old key stops working immediately (in-flight requests receive `401`). A "key not found" response from step 1 is ignored — it just means no public key existed yet. Public keys for other models are untouched.
+- **At most one public key per model.** The alias is `public-<model_name>`, which LiteLLM enforces as unique and identifies the key. Generating a new key for a model always revokes that model's previous public key first, so the old key stops working immediately (in-flight requests receive `401`). A "key not found" response from step 1 is ignored — it just means no public key existed yet. Public keys for other models are untouched.
 - **Shown once.** The new `sk-...` value is returned in the response of step 2 and passed straight back to the caller. The Catalog API neither stores nor logs it, so it cannot be retrieved again. A user who loses it generates a new one for the same model, which invalidates the lost one.
 - **Validated up front.** The model must have at least one registered route, and every requested deployment ID must be a `components` or `connectors` row serving that `model_name` with a registered route. Otherwise the request is rejected before anything is revoked.
 - **Outlives model changes.** Deleting a deployment does not revoke the public key. The key can only reach routes tagged with its deployment IDs, and deployment IDs are never reused, so once the route is gone the key grants nothing for it; regenerating replaces the key. Redeploying the model creates a new `components.id`, so the user must generate a new key to reach it.
@@ -1132,7 +1131,7 @@ Error responses: `404 {"error": "connector type \"<type>\" not found"}` for an u
 | `POST /api/v1/applications` | `services[].components[]` entries of type `llm` / `embedding` / `reranker` may carry an `instance_id` — the `components.id` of an existing `Running` instance. The entry is then just `{component_type, instance_id}`; `provider_id`, `version` and `params` are omitted because they are read from that row. Without `instance_id` the entry keeps its existing shape. See [Flow: Application Create — Model Already Deployed](#flow-application-create--model-already-deployed-pre-deployed-path) |
 | `POST /api/v1/applications` | `services[].components[]` entries of type `llm` / `embedding` / `reranker` must supply `model` as a **top-level field** on the component entry — not inside `params`. Application create does **not** accept a `profile` from the client: for a newly deployed model the backend resolves it from the service's `recommendations` (the entry matching the component type, provider and model — the same `profile` the application deploy-options response sends), falling back to the model's `default_profile` from `models.yaml` when there is no matching recommendation; an existing instance keeps the profile it was deployed with. To deploy a model at a specific profile, deploy it from the Models page (`POST /api/v1/models`) first and attach it with `instance_id`. `params` carries only provider-specific config (e.g. `apiKey`). Example: `{ "component_type": "llm", "provider_id": "vllm-spyre", "model": "ibm-granite/granite-3.3-8b-instruct", "params": {} }` |
 | `GET /api/v1/applications/:id` | Response includes model connectors from `connectors` table alongside `services` and local `components`. For `llm` / `embedding` / `reranker` components, `model` and `profile` are returned as **top-level fields** instead of inside `metadata`. Example component entry: `{ "id": "...", "type": "llm", "provider": { "id": "vllm-spyre", ... }, "status": "Running", "model": "ibm-granite/granite-3.3-8b-instruct", "profile": "compact-4k" }` |
-| `GET /api/v1/architectures/:id/deploy-options` | `providers` list under `llm`/`embedding`/`reranker` includes connector provider options (`watsonx`, `hosted_vllm`) alongside `vllm-cpu`, `vllm-spyre`; worker list included for target-worker selection |
+| `GET /api/v1/architectures/:id/deploy-options` | `providers` list under `llm`/`embedding`/`reranker` contains the local providers (`vllm-cpu`, `vllm-spyre`) only — remote connector providers (`watsonx`, `hosted_vllm`) are not offered; each carries `models`, `instances` and `recommendations` (see §8); worker list included for target-worker selection |
 
 ### 6.5 Public Key Endpoint
 
@@ -1516,7 +1515,7 @@ The `modelmanager` package validates `params` against the provider's parameter s
 
 **Endpoint:** `GET /api/v1/models`
 
-**Description:** Lists all models — both local (`components` table) and remote (`connectors` table with model types). Optionally filter by `provider_id`, `model`, component type, deployment type, or status. All filters are combined with AND. The deploy-options `instances.url` uses `provider_id` and `model` to populate the **Instance** dropdown (see [Populating the Instance dropdown](#populating-the-instance-dropdown)).
+**Description:** Lists all models — both local (`components` table) and remote (`connectors` table with model types). Optionally filter by `provider_id`, `model`, component type, deployment type, or status. Filters are combined with AND; the values of a repeated `provider_id`, `model` or `status` parameter are OR'd. The deploy-options `instances.url` uses `status`, `provider_id` and `model` to populate the **Instance** dropdown (see [Populating the Instance dropdown](#populating-the-instance-dropdown)).
 
 **Query Parameters:**
 
@@ -1526,7 +1525,7 @@ The `modelmanager` package validates `params` against the provider's parameter s
 | `deployment_type` | string | No | — | Filter by kind: `local` or `remote`. Omit to return both |
 | `provider_id` | string | No | — | Filter by provider (e.g. `vllm-spyre`, `vllm-cpu`, `watsonx`). Matches `components.provider` / `connectors.provider` |
 | `model` | string | No | — | Filter by model identifier (e.g. `ibm-granite/granite-3.3-8b-instruct`). Matches `components.metadata->>'model'` for local models and `connectors.metadata->>'model_name'` for remote ones |
-| `status` | string | No | — | Filter by status: `Running`, `Deploying`, `Error` (local) or `connected`, `offline` (remote) |
+| `status` | string (repeatable) | No | — | Filter by status: `Running`, `Deploying`, `Error` (local) or `connected`, `offline` (remote). Repeat the parameter to match any of several, e.g. `?status=Running&status=connected` |
 | `page` | integer | No | 1 | Page number (1-indexed) |
 | `page_size` | integer | No | 20 | Items per page (max 100) |
 
@@ -1862,7 +1861,7 @@ The UI sets `deployment_type=local`, `component_type`, `provider_id`, `model` an
 
 **Endpoint:** `POST /api/v1/models/{id}/keys`
 
-**Description:** Generates a **public** LiteLLM virtual key (`metadata.type = "public"`) for developers, CI pipelines and scripts that call the LiteLLM Gateway from outside the platform. The key is scoped to the model identified by `{id}` and covers all its active deployments. If a public key already exists for that model it is **revoked first**, so at most one public key per model is valid at any time. The new key is returned **once** in this response; it is not stored by the platform and cannot be retrieved again. See [Virtual Key Provisioning](#virtual-key-provisioning) for the LiteLLM calls involved.
+**Description:** Generates a **public** LiteLLM virtual key (alias `public-<model_name>`) for developers, CI pipelines and scripts that call the LiteLLM Gateway from outside the platform. The key is scoped to the model identified by `{id}` and covers all its active deployments. If a public key already exists for that model it is **revoked first**, so at most one public key per model is valid at any time. The new key is returned **once** in this response; it is not stored by the platform and cannot be retrieved again. See [Virtual Key Provisioning](#virtual-key-provisioning) for the LiteLLM calls involved.
 
 No request body. `created_by` is taken from the access token.
 
@@ -2142,7 +2141,7 @@ POST /api/v1/applications
                             → register mTLS egress on CP Caddy :8080
                             → apiBase = http://ai-services--caddy:8080/worker/<name>/models/<caddyRouteID>
           → POST /model/new to LiteLLM (model_name=modelName, api_base=apiBase, litellm_params.tags=[componentID])
-        → generate per-app virtual key: POST /key/generate {key_name: modelName, models:[modelName], duration:null, metadata:{type:"internal", tags:[componentID]}}
+        → generate per-app virtual key: POST /key/generate {key_alias: "<modelName>-<componentID>-app-<appSlug>", models:[modelName], duration:null, metadata:{tags:[componentID]}}
         → injectLiteLLMIntoServices:
             svc.Values["litellm"]["key"] = appVirtualKey
             svc.Values["llm"]["host"] / ["port"] / ["prefixPath"] / ["model"] → LiteLLM coordinates
@@ -2202,7 +2201,7 @@ POST /api/v1/applications
           remote → register mTLS ingress + egress Caddy routes
                  → apiBase = http://ai-services--caddy:8080/worker/<name>/models/<caddyRouteID>
       POST /model/new to LiteLLM (model_name=modelName, api_base=apiBase, litellm_params.tags=[componentID])
-      generate per-app virtual key → POST /key/generate {key_name: modelName, models:[modelName], duration:null, metadata:{type:"internal", tags:[componentID]}}
+      generate per-app virtual key → POST /key/generate {key_alias: "<modelName>-<componentID>-app-<appSlug>", models:[modelName], duration:null, metadata:{tags:[componentID]}}
       injectLiteLLMIntoServices → svc.Values["litellm"]["key"] = appVirtualKey
                                 → svc.Values["llm"]["host/port/prefixPath/model"] = LiteLLM coords
 
@@ -2290,7 +2289,7 @@ POST /api/v1/applications
   executeDeploymentAsync → resolveModelsAndPrepareKeys:
     modelName = connectors.metadata.model_name  (e.g. "ibm/granite-4-h-small")
     The route is already registered with LiteLLM at connector create time — no POST /model/new here.
-    generate per-app virtual key → POST /key/generate {key_name: modelName, models: [modelName], duration: null, metadata: {type: "internal", tags: [connectors.id]}}
+    generate per-app virtual key → POST /key/generate {key_alias: "<modelName>-<connectors.id>-app-<appSlug>", models: [modelName], duration: null, metadata: {tags: [connectors.id]}}
     injectLiteLLMIntoServices:
       svc.Values["litellm"]["key"] = appVirtualKey
       svc.Values["llm"]["host"] / ["port"] / ["prefixPath"] / ["model"=modelName] → LiteLLM coordinates
@@ -2430,14 +2429,14 @@ For `llm`, `embedding`, and `reranker` components in the response, `model` and `
 
 #### GET /api/v1/architectures/:id/deploy-options and GET /api/v1/services/:id/deploy-options — model providers
 
-For `llm`, `embedding`, and `reranker` component providers:
+For `llm`, `embedding`, and `reranker` component providers. Only **local** providers (`vllm-cpu`, `vllm-spyre`) are listed; remote connector providers (`watsonx`, `hosted_vllm`) are not offered here, since they are connected from the Models page (`POST /api/v1/models`) and attached to an application as an existing instance:
 
-- `category: "model"` is added so the UI knows to render a model + instance selector instead of a schema-driven params form
+- `category: "models"` is set on the **component** (next to `type` and `name`), not on each provider. It is taken from the `category` the component's providers declare in their `metadata.yaml`, so the UI knows to render a model + instance selector instead of a schema-driven params form
 - `models` — named URL reference; UI calls `models.url` to fetch and populate the model dropdown
-- `instances` — named URL reference; UI substitutes `{model_id}` with the selected model ID and calls `instances.url` (`GET /api/v1/models` filtered by `provider_id`, `model`, `deployment_type`, and `status`) to populate the **Instance** dropdown with existing instances of that model the user can attach to instead of deploying a new one
-- `recommendations` — ordered list of `{ model_id, profile }` entries declared by the service for this component and provider (sourced from `models[].providers[].recommendations` in `services/<id>/metadata.yaml`; `profile` omitted for remote providers). The **first entry** is the primary: the UI pre-selects its model and shows a **"★ Recommended"** badge on it. The `profile` is sent for display only — the UI does **not** submit it back; on `POST /api/v1/applications` the backend applies the matching recommendation's `profile` itself. Omitted when the service declares none
+- `instances` — named URL reference (`GET /api/v1/models?status=Running&status=connected`): the models in the status they can be attached to an application in, `Running` for a local instance and `connected` for a remote one. UI appends the `provider_id` of the provider and the selected `model` as query parameters and calls it to populate the **Instance** dropdown with existing instances of that model the user can attach to instead of deploying a new one
+- `recommendations` — ordered list of `{ model, profile }` entries declared by the service for this component and provider (sourced from `models[].providers[].recommendations` in `services/<id>/metadata.yaml`). The **first entry** is the primary: the UI pre-selects its model and shows a **"★ Recommended"** badge on it. The `profile` is sent for display only — the UI does **not** submit it back; on `POST /api/v1/applications` the backend applies the matching recommendation's `profile` itself. Omitted when the service declares none
 - `schema` still points to `values.schema.json` for any remaining provider-specific config (e.g. `apiKey`); it no longer contains `model` or `profile` properties, so it carries no recommendations
-- Non-model providers (`opensearch`, `milvus`) omit `category`, `models`, `instances`, and `recommendations`
+- Non-model components (`vector_store`) omit `category`, and their providers (`opensearch`, `milvus`) omit `models`, `instances`, and `recommendations`
 
 **After — complete architecture deploy-options response:**
 
@@ -2471,19 +2470,19 @@ For `llm`, `embedding`, and `reranker` component providers:
         {
           "type": "llm",
           "name": "LLM Model",
+          "category": "models",
           "providers": [
             {
               "id": "vllm-spyre",
               "name": "Red Hat AI Inference with Spyre",
               "description": "Deploy new instruct model on vLLM with Spyre accelerator",
               "default": true,
-              "category": "model",
               "schema": "/api/v1/components/llm/providers/vllm-spyre/params",
               "models":         { "name": "Large Language Models", "url": "/api/v1/catalog/models?component_type=llm" },
-              "instances":      { "name": "Running Instances",     "url": "/api/v1/models?provider_id=vllm-spyre&model={model_id}&deployment_type=local&status=Running" },
+              "instances":      { "name": "Instances", "url": "/api/v1/models?status=Running&status=connected" },
               "recommendations": [
-                { "model_id": "ibm-granite/granite-4.1-8b-fp8",         "profile": "standard" },
-                { "model_id": "ibm-granite/granite-3.3-8b-instruct",    "profile": "balanced" }
+                { "model": "ibm-granite/granite-4.1-8b-fp8",         "profile": "standard" },
+                { "model": "ibm-granite/granite-3.3-8b-instruct",    "profile": "balanced" }
               ]
             },
             {
@@ -2491,26 +2490,12 @@ For `llm`, `embedding`, and `reranker` component providers:
               "name": "AI Inference on CPU",
               "description": "Deploy new instruct model on vLLM using CPU",
               "default": false,
-              "category": "model",
               "schema": "/api/v1/components/llm/providers/vllm-cpu/params",
               "models":         { "name": "Large Language Models", "url": "/api/v1/catalog/models?component_type=llm" },
-              "instances":      { "name": "Running Instances",     "url": "/api/v1/models?provider_id=vllm-cpu&model={model_id}&deployment_type=local&status=Running" },
+              "instances":      { "name": "Instances", "url": "/api/v1/models?status=Running&status=connected" },
               "recommendations": [
-                { "model_id": "ibm-granite/granite-4.1-8b-fp8",         "profile": "standard" },
-                { "model_id": "ibm-granite/granite-3.3-8b-instruct",    "profile": "balanced" }
-              ]
-            },
-            {
-              "id": "watsonx",
-              "name": "IBM watsonx.ai",
-              "description": "Connect to IBM watsonx.ai hosted LLM",
-              "default": false,
-              "category": "model",
-              "schema": "/api/v1/connectors/models/providers/watsonx/params",
-              "models":         { "name": "Large Language Models", "url": "/api/v1/catalog/models?component_type=llm" },
-              "instances":      { "name": "Connected Instances",   "url": "/api/v1/models?provider_id=watsonx&model={model_id}&deployment_type=remote&status=connected" },
-              "recommendations": [
-                { "model_id": "ibm/granite-3-8b-instruct" }
+                { "model": "ibm-granite/granite-4.1-8b-fp8",         "profile": "standard" },
+                { "model": "ibm-granite/granite-3.3-8b-instruct",    "profile": "balanced" }
               ]
             }
           ]
@@ -2518,18 +2503,18 @@ For `llm`, `embedding`, and `reranker` component providers:
         {
           "type": "embedding",
           "name": "Embedding Model",
+          "category": "models",
           "providers": [
             {
               "id": "vllm-cpu",
               "name": "AI Inference on CPU",
               "description": "Deploy new embedding model on vLLM using CPU",
               "default": true,
-              "category": "model",
               "schema": "/api/v1/components/embedding/providers/vllm-cpu/params",
               "models":         { "name": "Embedding Models",  "url": "/api/v1/catalog/models?component_type=embedding" },
-              "instances":      { "name": "Running Instances", "url": "/api/v1/models?provider_id=vllm-cpu&model={model_id}&deployment_type=local&status=Running" },
+              "instances":      { "name": "Instances", "url": "/api/v1/models?status=Running&status=connected" },
               "recommendations": [
-                { "model_id": "ibm-granite/granite-embedding-278m-multilingual", "profile": "standard" }
+                { "model": "ibm-granite/granite-embedding-278m-multilingual", "profile": "standard" }
               ]
             }
           ]
@@ -2540,7 +2525,7 @@ For `llm`, `embedding`, and `reranker` component providers:
 }
 ```
 
-> The UI uses `category: "model"` to switch from a schema-driven params form to a model + instance selector. It calls `models.url` to populate the model dropdown; the model pre-selection, and the profile shown for it, come from the provider's `recommendations` list in this response (see `service-model-contracts.md`). `models.url` stays a generic catalog endpoint with no service parameter. Once a model is chosen, the UI substitutes `{model_id}` into `instances.url` and calls `GET /api/v1/models` to populate the **Instance** dropdown with existing instances of that model. An empty result means no instance exists yet and the user must deploy one first. Once a model is chosen (new deploy) or an instance is chosen (existing), it is submitted as a top-level field on the component entry (`model` or `instance_id`) — not inside `params`. No profile is submitted: the backend applies the recommended `profile` for the chosen model when it deploys a new instance. `schema` is still called for any remaining provider-specific config (e.g. `apiKey`).
+> The UI uses the component's `category: "models"` to switch from a schema-driven params form to a model + instance selector. It calls `models.url` to populate the model dropdown; the model pre-selection, and the profile shown for it, come from the provider's `recommendations` list in this response (see `service-model-contracts.md`). `models.url` stays a generic catalog endpoint with no service parameter. Once a model is chosen, the UI appends `provider_id` and `model` to `instances.url` and calls `GET /api/v1/models` to populate the **Instance** dropdown with existing instances of that model. An empty result means no instance exists yet and the user must deploy one first. Once a model is chosen (new deploy) or an instance is chosen (existing), it is submitted as a top-level field on the component entry (`model` or `instance_id`) — not inside `params`. No profile is submitted: the backend applies the recommended `profile` for the chosen model when it deploys a new instance. `schema` is still called for any remaining provider-specific config (e.g. `apiKey`).
 
 ---
 
@@ -2599,7 +2584,7 @@ In both cases the component row is written with `created_by`, `worker_id`, and `
 
 ### 10. Internal Virtual Keys Are Pod-Scoped, Not DB-Scoped
 
-Each application receives a unique LiteLLM virtual key (`metadata.type = "internal"`) scoped to the model's route. This key is generated fresh at application create time, injected into `svc.Values["litellm"]["key"]`, and rendered into a Podman Secret (`litellm-secret-<instance-slug>`) by the `litellm-secret.yaml.tmpl` catalog template. Service pods read it via a volume mount at `/etc/secret/litellm-secret/LITELLM_VIRTUAL_KEY` and export it as `LLM_API_KEY` (or `EMB_API_KEY` for embedding). The key is **never stored in the Catalog DB**.
+Each application receives a unique LiteLLM virtual key (alias `<model>-<id>-app-<appSlug>`, where `appSlug` is the application's instance slug) scoped to the model's route. This key is generated fresh at application create time, injected into `svc.Values["litellm"]["key"]`, and rendered into a Podman Secret (`litellm-secret-<instance-slug>`) by the `litellm-secret.yaml.tmpl` catalog template. Service pods read it via a volume mount at `/etc/secret/litellm-secret/LITELLM_VIRTUAL_KEY` and export it as `LLM_API_KEY` (or `EMB_API_KEY` for embedding). The key is **never stored in the Catalog DB**.
 
 ### 11. LiteLLM `api_base` Differs for Local vs Remote Workers
 
@@ -2612,7 +2597,7 @@ This mirrors the exact same logic used by `model_service.deployAsync`.
 
 ### 12. One Public Key per Model, Identified by Metadata, Enforced by Alias
 
-Callers outside the platform need a key, but the platform must not accumulate them. Instead of persisting keys in a table, the `public` key is distinguished in LiteLLM itself: `metadata.type = "public"` marks its purpose and the alias `public-<model_name>` lets LiteLLM enforce one key per model. The key is generated for a chosen model and deployment(s), so it is tied to specific workers and profiles and grants only what the user asked for. Using the deployment ID (`components.id` / `connectors.id`) as the tag means no worker or profile string has to be composed or parsed: the ID is already unique, and the row behind it holds the worker and profile. Generating a new one for the same model revokes the old one first, shows the new value once, and stores nothing. `internal` keys carry `metadata.type = "internal"` so the two kinds can always be told apart. A leaked public key is recovered with a single regenerate.
+Callers outside the platform need a key, but the platform must not accumulate them. Instead of persisting keys in a table, the `public` key is distinguished in LiteLLM itself: the alias `public-<model_name>` lets LiteLLM enforce one key per model. The key is generated for a chosen model and deployment(s), so it is tied to specific workers and profiles and grants only what the user asked for. Using the deployment ID (`components.id` / `connectors.id`) as the tag means no worker or profile string has to be composed or parsed: the ID is already unique, and the row behind it holds the worker and profile. Generating a new one for the same model revokes the old one first, shows the new value once, and stores nothing. `internal` keys are told apart by their alias, `<model>-<id>-app-<appSlug>`, which carries the application's instance slug. A leaked public key is recovered with a single regenerate.
 
 ---
 

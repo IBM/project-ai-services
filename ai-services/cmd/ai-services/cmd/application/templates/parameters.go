@@ -148,8 +148,6 @@ func displayDeployOptionsParameters(ctx context.Context, source catalogClient.Ca
 	}
 }
 
-// Made with Bob
-
 // displaySchemaParameters displays parameters from a schema with the given prefix.
 func displaySchemaParameters(schema map[string]any, prefix string) {
 	properties, ok := schema["properties"].(map[string]any)

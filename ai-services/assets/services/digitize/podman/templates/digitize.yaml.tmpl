@@ -4,7 +4,7 @@ metadata:
   name: "digitize-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
-    ai-services.io/secret: "digitize-db-encryption-secret-{{ .InstanceSlug }}"
+    ai-services.io/secret: "digitize-db-encryption-secret-{{ .InstanceSlug }},llm-{{ .Values.llm.instanceSlug }}-secret-key-{{ .InstanceSlug }},embedding-{{ .Values.embedding.instanceSlug }}-secret-key-{{ .InstanceSlug }}"
     ai-services.io/secret-skip-cleanup: "true"
     ai-services.io/volume: "digitize-cache-{{ .InstanceSlug }},digitize-db-encryption-secret-{{ .InstanceSlug }}"
   annotations:
@@ -70,9 +70,8 @@ spec:
           export OPENSEARCH_USERNAME=$(cat /etc/secret/opensearch-secret/username)
           export OPENSEARCH_PASSWORD=$(cat /etc/secret/opensearch-secret/password)
           export DB_ENCRYPTION_KEY=$(cat /etc/secret/digitize-db-encryption-secret/db-encryption-key)
-          {{- if .Values.llm.apiKey }}
-          export LLM_API_KEY=$(cat /etc/secret/vllm-secret/apiKey)
-          {{- end }}
+          export LLM_API_KEY=$(cat /etc/secret/llm-secret-key/key)
+          export EMB_API_KEY=$(cat /etc/secret/embedding-secret-key/key)
           exec /var/venv/bin/python -m uvicorn app:app \
             --host 0.0.0.0 \
             --port 4000 \
@@ -106,13 +105,17 @@ spec:
         - name: DB_MAX_OVERFLOW
           value: "5"
         - name: EMB_ENDPOINT
-          value: "http://{{ .Values.embedding.host }}:{{ .Values.embedding.port }}"
+          value: "http://{{ .Values.embedding.host }}:{{ .Values.embedding.port }}{{ .Values.embedding.path }}"
+        - name: EMB_TOKENIZE_ENDPOINT
+          value: "{{ .Values.embedding.tokenize_endpoint }}"
         - name: EMB_MODEL
           value: "{{ .Values.embedding.model }}"
         - name: EMB_MAX_MODEL_LEN
           value: "{{ .Values.embedding.maxModelLen }}"
         - name: LLM_ENDPOINT
-          value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}"
+          value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}{{ .Values.llm.path }}"
+        - name: LLM_TOKENIZE_ENDPOINT
+          value: "{{ .Values.llm.tokenize_endpoint }}"
         - name: LLM_MODEL
           value: "{{ .Values.llm.model }}"
         - name: LLM_MAX_MODEL_LEN
@@ -143,11 +146,12 @@ spec:
         - mountPath: /etc/secret/digitize-db-encryption-secret
           name: digitize-db-encryption-secret
           readOnly: true
-        {{- if .Values.llm.apiKey }}
-        - mountPath: /etc/secret/vllm-secret
-          name: vllm-secret
+        - mountPath: /etc/secret/llm-secret-key
+          name: llm-secret-key
           readOnly: true
-        {{- end }}
+        - mountPath: /etc/secret/embedding-secret-key
+          name: embedding-secret-key
+          readOnly: true
     - name: mcp-sidecar
       image: "{{ .Values.mcp.image }}"
       args:
@@ -191,8 +195,9 @@ spec:
     - name: opensearch-secret
       secret:
         secretName: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
-    {{- if .Values.llm.apiKey }}
-    - name: vllm-secret
+    - name: llm-secret-key
       secret:
-        secretName: "vllm-secret-{{ .Values.llm.instanceSlug }}"
-    {{- end }}
+        secretName: "llm-{{ .Values.llm.instanceSlug }}-secret-key-{{ .InstanceSlug }}"
+    - name: embedding-secret-key
+      secret:
+        secretName: "embedding-{{ .Values.embedding.instanceSlug }}-secret-key-{{ .InstanceSlug }}"

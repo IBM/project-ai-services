@@ -260,4 +260,11 @@ class TestValidateQueryLength:
         
         validate_query_length(query, endpoint)
         
-        mock_tokenize.assert_called_once_with(query, endpoint)
+        from common.settings import settings as common_settings
+
+        mock_tokenize.assert_called_once_with(
+            query,
+            endpoint,
+            common_settings.embedding.api_key.get_secret_value(),
+            model_config=common_settings.embedding,
+        )

@@ -26,13 +26,13 @@
 
 - id: compact-4k
   default: false
-  name: "Compact 4k"
-  description: "1 card, 100 GiB RAM, 4k context"
+  name: "Compact"
+  description: "1 card, 100 GiB RAM, 3k context"
   params:
     resources:
       memory: 107374182400 # 100Gi in bytes
       accelerators:
         ibm.com/spyre_pf: 1
-    maxModelLen: 4096
-    maxBatchSize: 32
+    maxModelLen: 3072
+    maxBatchSize: 16
     shmSize: "2Gi"

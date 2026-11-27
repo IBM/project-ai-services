@@ -258,7 +258,35 @@ def query_litellm_model_info(endpoint: str, api_key: str | None = None) -> dict:
 
     logger.debug("Querying LiteLLM /model/info")
     response = misc_utils.SESSION.get(
-        f"{endpoint}/model/info"
+        f"{endpoint}/model/info",
+        headers=get_vllm_headers(api_key),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def query_gateway_key_info(endpoint: str, api_key: str | None) -> dict:
+    """Query the model gateway's /key/info endpoint for the key the caller provided.
+
+    The gateway authenticates the request with the bearer token and, when no ``key``
+    query parameter is given, returns the info of that same key.
+
+    Args:
+        endpoint: Base URL of the model gateway (e.g. ``http://localhost:4000``).
+        api_key: The key to look up, also used as the bearer token. When ``None`` no
+            Authorization header is sent, which the gateway rejects with a 401.
+
+    Returns:
+        Parsed JSON response dict from /key/info. Raises ``requests.HTTPError``
+        on any non-2xx response (a rejected key is a 401).
+    """
+    if misc_utils.SESSION is None:
+        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+
+    logger.debug("Querying model gateway /key/info")
+    response = misc_utils.SESSION.get(
+        f"{endpoint}/key/info",
+        headers=get_vllm_headers(api_key),
     )
     response.raise_for_status()
     return response.json()
@@ -293,16 +321,16 @@ def query_vllm_payload(
     query_system_prompt = lang_config.query_system_prompt
 
     # Calculate token counts
-    question_token_count = len(tokenize_with_llm(question, llm_endpoint))
-    context_tokens = tokenize_with_llm(context, llm_endpoint)
+    question_token_count = len(tokenize_with_llm(question, llm_endpoint, api_key))
+    context_tokens = tokenize_with_llm(context, llm_endpoint, api_key)
     context_token_count = len(context_tokens)
-    initial_system_token_overhead = len(tokenize_with_llm(system_prompt, llm_endpoint))
+    initial_system_token_overhead = len(tokenize_with_llm(system_prompt, llm_endpoint, api_key))
     query_system_prompt_sample = query_system_prompt.format(
         context="",
         rephrased_query="",
         max_tokens=max_new_tokens,
     )
-    rag_system_token_overhead = len(tokenize_with_llm(query_system_prompt_sample, llm_endpoint))
+    rag_system_token_overhead = len(tokenize_with_llm(query_system_prompt_sample, llm_endpoint, api_key))
 
     llm_max_model_len = resolve_model_max_len(
         llm_endpoint,
@@ -333,7 +361,7 @@ def query_vllm_payload(
             f"History budget: {history_budget} tokens"
         )
     else:
-        context = truncate_text_to_token_limit(context, budget_for_context, llm_endpoint, tokens=context_tokens)
+        context = truncate_text_to_token_limit(context, budget_for_context, llm_endpoint, api_key, tokens=context_tokens)
         history_budget = 0
         previous_messages = None
         logger.debug(
@@ -354,7 +382,7 @@ def query_vllm_payload(
         truncated_messages = truncate_history_by_tokens(
             previous_messages,
             history_budget,
-            lambda text: tokenize_with_llm(text, llm_endpoint)
+            lambda text: tokenize_with_llm(text, llm_endpoint, api_key)
         )
 
         if truncated_messages:
@@ -624,14 +652,22 @@ def query_vllm_summarize_stream(
         yield "data: [DONE]\n\n"
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def tokenize_with_llm(prompt, emb_endpoint, max_retries=3):
+def tokenize_with_llm(prompt, emb_endpoint, api_key, max_retries=3, model_config=None):
     """
-    Tokenize text using the LLM embedding endpoint with retry logic.
+    Tokenize text using the model's tokenizer with retry logic.
+
+    The tokenize URL is the model's ``tokenize_endpoint`` setting when set (the model gateway's
+    per-deployment /tokenize passthrough), otherwise ``<emb_endpoint>/tokenize``. The key is
+    always sent: it must be the key of the model being tokenized with (the LLM's for the LLM, the
+    embedding model's for the embedding model), or the key of the user the request is made for.
 
     Args:
         prompt: Text to tokenize
-        emb_endpoint: Embedding endpoint URL
+        emb_endpoint: Model endpoint URL, used when the model has no tokenize endpoint configured
+        api_key: Key to authenticate with
         max_retries: Maximum number of retry attempts (default: 3)
+        model_config: Settings of the model to tokenize with, e.g. ``settings.embedding``, that
+            the tokenize endpoint is read from. Defaults to the LLM.
 
     Returns:
         List of tokens
@@ -647,14 +683,18 @@ def tokenize_with_llm(prompt, emb_endpoint, max_retries=3):
         "prompt": prompt
     }
 
-    response = misc_utils.SESSION.post(f"{emb_endpoint}/tokenize", json=payload)
+    model_config = model_config or settings.llm
+    url = model_config.tokenize_endpoint or f"{emb_endpoint}/tokenize"
+    headers = get_vllm_headers(api_key)
+
+    response = misc_utils.SESSION.post(url, json=payload, headers=headers)
     response.raise_for_status()
     result = response.json()
     tokens = result.get("tokens", [])
 
     return tokens
 
-def truncate_text_to_token_limit(text, token_limit, llm_endpoint, tokens=None):
+def truncate_text_to_token_limit(text, token_limit, llm_endpoint, api_key, tokens=None):
     """
     This function uses a character ratio approach to truncate text to fit within
     the token budget. It estimates the character limit based on the token-to-character
@@ -665,6 +705,7 @@ def truncate_text_to_token_limit(text, token_limit, llm_endpoint, tokens=None):
         token_limit: Maximum number of tokens allowed
         llm_endpoint: LLM endpoint URL for tokenization
         tokens: Optional pre-computed tokens for the text
+        api_key: Key to tokenize with
 
     Returns:
         Truncated text string that fits within token_limit
@@ -680,7 +721,7 @@ def truncate_text_to_token_limit(text, token_limit, llm_endpoint, tokens=None):
     
     # Use pre-computed tokens if provided, otherwise tokenize
     if tokens is None:
-        tokens = tokenize_with_llm(text, llm_endpoint)
+        tokens = tokenize_with_llm(text, llm_endpoint, api_key)
     
     # If truncation is not needed, return original text
     if len(tokens) <= token_limit:
@@ -694,7 +735,7 @@ def truncate_text_to_token_limit(text, token_limit, llm_endpoint, tokens=None):
     truncated_text = text[:approx_char_limit]
     
     # Verify and adjust if needed
-    while len(tokenize_with_llm(truncated_text, llm_endpoint)) > token_limit:
+    while len(tokenize_with_llm(truncated_text, llm_endpoint, api_key)) > token_limit:
         # Reduce by 10% and retry
         truncated_text = truncated_text[:int(len(truncated_text) * 0.9)]
     

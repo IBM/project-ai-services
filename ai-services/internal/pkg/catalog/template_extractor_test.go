@@ -868,7 +868,7 @@ func TestComponentTemplates_FollowProfile(t *testing.T) {
 		}{
 			{"standard", "4", 214748364800, "2Gi", "32768", 4},
 			{"balanced", "2", 161061273600, "2Gi", "8192", 2},
-			{"compact-4k", "1", 107374182400, "2Gi", "4096", 1},
+			{"compact-4k", "1", 107374182400, "2Gi", "3072", 1},
 		}
 
 		for _, tt := range tests {

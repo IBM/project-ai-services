@@ -5,14 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"strings"
-	"sync"
 	"text/template"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/modelphase"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/podman"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -37,7 +36,6 @@ type (
 	DeploymentPlan = deploymenttypes.DeploymentPlan
 	ComponentPlan  = deploymenttypes.ComponentPlan
 	ServicePlan    = deploymenttypes.ServicePlan
-	SpyreCardPool  = deploymenttypes.SpyreCardPool
 )
 
 // PodmanDeployer implements deployment execution for Podman runtime.
@@ -49,6 +47,8 @@ type PodmanDeployer struct {
 	appRepo         repository.ApplicationRepository
 	serviceRepo     repository.ServiceRepository
 	componentRepo   repository.ComponentRepository
+	// models runs the download and deploy phases of the model components of a plan.
+	models *modelphase.Runner
 }
 
 // NewPodmanDeployer creates a new PodmanDeployer instance.
@@ -58,6 +58,7 @@ func NewPodmanDeployer(
 	appRepo repository.ApplicationRepository,
 	serviceRepo repository.ServiceRepository,
 	componentRepo repository.ComponentRepository,
+	models *modelphase.Runner,
 ) *PodmanDeployer {
 	return &PodmanDeployer{
 		runtime:         rt,
@@ -67,17 +68,17 @@ func NewPodmanDeployer(
 		appRepo:         appRepo,
 		serviceRepo:     serviceRepo,
 		componentRepo:   componentRepo,
+		models:          models,
 	}
 }
 
 // ExecuteDeployment executes the deployment plan for an application or standalone service.
 // This implements the deployment flow:
-// 1. Pull container images for all components and services
-// 2. Download models specified in component/service parameters
-// 3. Calculate and allocate Spyre cards if needed
-// 4. Deploy components
-// 5. Deploy services
-// 6. Update database with endpoints and final status
+// 1. Pull container images for the non-model components and services, and download the model
+// components (images and weights) through the model service
+// 2. Deploy the components, the model components through the model service
+// 3. Deploy services
+// 4. Register routes and update the final status
 //
 // Note: Application, service, and component records are already created by ApplicationService
 // before this method is called. This method only updates endpoints and status.
@@ -89,10 +90,13 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	logger.InfofCtx(ctx, "Starting deployment execution for '%s'\n", plan.ApplicationName)
 
 	if err := d.prepareDeployment(ctx, plan); err != nil {
+		// The models were recorded as Downloading and will now never be started.
+		d.models.Fail(ctx, plan, err)
+
 		return err
 	}
 
-	// Step 2: Deploy components if any
+	// Step 2: Deploy components if any, the model components through the model service
 	if len(plan.Components) > 0 {
 		if err := d.deployComponents(ctx, plan); err != nil {
 			catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Component deployment failed", err)
@@ -130,7 +134,7 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	return nil
 }
 
-// prepareDeployment pulls images, downloads models, and transitions the
+// prepareDeployment pulls images, downloads the models, and transitions the
 // application status to Deploying. It is a prerequisite for all deploy steps.
 func (d *PodmanDeployer) prepareDeployment(ctx context.Context, plan *DeploymentPlan) error {
 	baseDir, err := podmanutils.FetchBaseDir(ctx, d.runtime)
@@ -146,11 +150,11 @@ func (d *PodmanDeployer) prepareDeployment(ctx context.Context, plan *Deployment
 		return fmt.Errorf("failed to pull images: %w", err)
 	}
 
-	// Step 1b: Download models specified in parameters
-	if err := d.downloadModelsForDeployment(ctx, plan); err != nil {
+	// Step 1b: Download the model components through the model service
+	if err := d.models.Download(ctx, plan); err != nil {
 		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Model download failed", err)
 
-		return fmt.Errorf("failed to download models: %w", err)
+		return err
 	}
 
 	// Transition status to Deploying before pod creation begins.
@@ -164,68 +168,8 @@ func (d *PodmanDeployer) prepareDeployment(ctx context.Context, plan *Deployment
 	return nil
 }
 
-// downloadModelsForDeployment downloads all models specified in component and service parameters.
-// Models are extracted from params that contain "model" in their key name.
-func (d *PodmanDeployer) downloadModelsForDeployment(ctx context.Context, plan *DeploymentPlan) error {
-	logger.InfofCtx(ctx, "Downloading models for application '%s'\n", plan.ApplicationName)
-
-	modelSet := d.collectModelsFromPlan(ctx, plan)
-
-	if len(modelSet) == 0 {
-		logger.InfofCtx(ctx, "No models to download for application '%s'\n", plan.ApplicationName)
-
-		return nil
-	}
-
-	if err := d.downloadModels(ctx, modelSet); err != nil {
-		return err
-	}
-
-	logger.InfofCtx(ctx, "Successfully downloaded all models for application '%s'\n", plan.ApplicationName)
-
-	return nil
-}
-
-// collectModelsFromPlan collects all unique model names from the deployment plan.
-func (d *PodmanDeployer) collectModelsFromPlan(ctx context.Context, plan *DeploymentPlan) map[string]bool {
-	modelSet := make(map[string]bool)
-
-	// Extract models from component params
-	for _, comp := range plan.Components {
-		// do not download models for watsonx
-		if strings.EqualFold(comp.ProviderID, "watsonx") {
-			logger.InfofCtx(ctx, "Skipping model download for provider: %s\n", comp.ProviderID)
-
-			continue
-		}
-		d.extractModelsFromParams(comp.Params, modelSet)
-	}
-
-	return modelSet
-}
-
-// extractModelsFromParams extracts model names from parameter maps.
-func (d *PodmanDeployer) extractModelsFromParams(params map[string]any, modelSet map[string]bool) {
-	for key, value := range params {
-		if strings.Contains(strings.ToLower(key), "model") {
-			if modelName, ok := value.(string); ok && modelName != "" {
-				modelSet[modelName] = true
-			}
-		}
-	}
-}
-
-// downloadModels downloads all models in the provided set using the shared podmanutils helper.
-func (d *PodmanDeployer) downloadModels(ctx context.Context, modelSet map[string]bool) error {
-	models := make([]string, 0, len(modelSet))
-	for modelName := range modelSet {
-		models = append(models, modelName)
-	}
-
-	return podmanutils.DownloadModels(ctx, d.runtime, models)
-}
-
-// pullImagesForDeployment pulls all container images required for components and services.
+// pullImagesForDeployment pulls the container images of the non-model components and services.
+// The images of a model component are pulled by the model service, in its download phase.
 func (d *PodmanDeployer) pullImagesForDeployment(ctx context.Context, plan *DeploymentPlan) error {
 	logger.InfofCtx(ctx, "Pulling container images for application '%s'\n", plan.ApplicationName)
 
@@ -257,7 +201,7 @@ func (d *PodmanDeployer) collectImagesFromPlan(ctx context.Context, plan *Deploy
 	imageSet[vars.ToolImage] = true
 
 	// Extract images from component templates
-	for _, comp := range plan.Components {
+	for _, comp := range plan.NonModelComponents() {
 		if err := d.extractImagesFromComponent(ctx, comp, imageSet); err != nil {
 			return nil, err
 		}
@@ -329,9 +273,7 @@ func (d *PodmanDeployer) pullImages(ctx context.Context, imageSet map[string]boo
 // deployComponents deploys all components concurrently.
 // All components are treated as shared and deployed together.
 func (d *PodmanDeployer) deployComponents(ctx context.Context, plan *DeploymentPlan) error {
-	// Deploy all components concurrently
-	logger.InfofCtx(ctx, "Deploying %d components concurrently...\n", len(plan.Components))
-	if err := d.deployComponentsConcurrently(ctx, plan.Components, plan); err != nil {
+	if err := d.deployComponentsConcurrently(ctx, plan); err != nil {
 		return fmt.Errorf("failed to deploy components: %w", err)
 	}
 
@@ -340,38 +282,29 @@ func (d *PodmanDeployer) deployComponents(ctx context.Context, plan *DeploymentP
 	return nil
 }
 
-// deployComponentsConcurrently deploys multiple components concurrently using goroutines.
-func (d *PodmanDeployer) deployComponentsConcurrently(ctx context.Context, components map[string]*ComponentPlan, plan *DeploymentPlan) error {
-	if len(components) == 0 {
-		return nil
-	}
-
-	// Build hash → dbID index so RunConcurrently can track status per component.
-	// A shared mutex is passed into each deployComponent call to protect concurrent
-	// writes to service Values maps (endpoint merging).
-	var mu sync.Mutex
-	items := make(map[string]uuid.UUID, len(components))
-	for hash, comp := range components {
-		items[hash] = comp.DatabaseID
-	}
+// deployComponentsConcurrently deploys the components of the plan concurrently, the model components
+// through the model service.
+func (d *PodmanDeployer) deployComponentsConcurrently(ctx context.Context, plan *DeploymentPlan) error {
+	logger.InfofCtx(ctx, "Deploying %d components concurrently...\n", len(plan.Components))
 
 	return catalogutils.RunConcurrently(
 		ctx,
-		items,
+		plan.ComponentIDs(),
 		func(ctx context.Context, hash string) error {
-			return d.deployComponent(ctx, hash, components[hash], plan, &mu)
+			comp := plan.Components[hash]
+			if comp.IsModel() {
+				return d.models.DeployModel(ctx, plan, comp)
+			}
+
+			return d.deployComponent(ctx, hash, comp, plan)
 		},
-		func(ctx context.Context, dbID uuid.UUID, msg string) error {
-			return catalogutils.UpdateComponentStatus(ctx, d.componentRepo, dbID, models.ComponentStatusError, msg)
-		},
-		func(ctx context.Context, dbID uuid.UUID, msg string) error {
-			return catalogutils.UpdateComponentStatus(ctx, d.componentRepo, dbID, models.ComponentStatusRunning, msg)
-		},
+		plan.ComponentStatusFunc(d.componentRepo, models.ComponentStatusError),
+		plan.ComponentStatusFunc(d.componentRepo, models.ComponentStatusRunning),
 	)
 }
 
 // deployComponent deploys a single component and updates its endpoint in the database.
-func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp *ComponentPlan, plan *DeploymentPlan, mu *sync.Mutex) error {
+func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp *ComponentPlan, plan *DeploymentPlan) error {
 	logger.InfofCtx(ctx, "Deploying component %s (%s/%s)...\n", comp.ComponentType, comp.ProviderID, hash)
 
 	component, metadata, tmpls, err := d.loadComponentResources(comp)
@@ -381,11 +314,11 @@ func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp 
 
 	logger.InfofCtx(ctx, "Component %s loaded: %s\n", component.ID, component.Name)
 
-	if err := d.deployComponentPods(ctx, comp, metadata, tmpls, plan); err != nil {
+	if err := d.deployComponentPods(ctx, comp, metadata, tmpls); err != nil {
 		return fmt.Errorf("failed to deploy component pods: %w", err)
 	}
 
-	d.mergeComponentEndpoints(ctx, comp, plan, mu)
+	plan.MergeEndpoints(ctx, comp)
 
 	// Update component endpoints in database (internal endpoints only)
 	if len(comp.Endpoints) > 0 {
@@ -424,89 +357,15 @@ func (d *PodmanDeployer) loadComponentResources(comp *ComponentPlan) (*types.Com
 	return component, metadata, tmpls, nil
 }
 
-// mergeComponentEndpoints merges component endpoints into services that use the component.
-func (d *PodmanDeployer) mergeComponentEndpoints(ctx context.Context, comp *ComponentPlan, plan *DeploymentPlan, mu *sync.Mutex) {
-	if len(comp.Endpoints) == 0 {
-		logger.InfofCtx(ctx, "Component %s has no endpoints to merge\n", comp.ComponentType)
-
-		return
-	}
-
-	mu.Lock()
-	defer mu.Unlock()
-
-	for _, serviceID := range comp.UsedByServices {
-		d.mergeEndpointIntoService(ctx, comp, plan, serviceID)
-	}
-}
-
-// mergeEndpointIntoService merges component endpoint data into a specific service.
-func (d *PodmanDeployer) mergeEndpointIntoService(ctx context.Context, comp *ComponentPlan, plan *DeploymentPlan, serviceID string) {
-	svc, ok := plan.Services[serviceID]
-	if !ok {
-		return
-	}
-
-	if svc.Values == nil {
-		svc.Values = make(map[string]any)
-	}
-
-	// Add instanceSlug to the component's values in the service
-	// This allows templates to reference it as .Values.vector_store.instanceSlug
-	if componentValues, ok := svc.Values[comp.ComponentType].(map[string]any); ok {
-		instanceSlug := catalogutils.GenerateInstanceSlug(comp.DatabaseID.String())
-		componentValues["instanceSlug"] = instanceSlug
-		logger.InfofCtx(ctx, "Added instanceSlug '%s' to component %s in service %s\n", instanceSlug, comp.ComponentType, serviceID)
-	}
-
-	endpointData, ok := comp.Endpoints[comp.ComponentType]
-	if !ok {
-		logger.ErrorfCtx(ctx, "Component %s endpoint data not found in comp.Endpoints map\n", comp.ComponentType)
-
-		return
-	}
-
-	d.updateServiceValuesWithEndpoint(ctx, svc, comp.ComponentType, endpointData, serviceID)
-}
-
-// updateServiceValuesWithEndpoint updates service values with endpoint data.
-func (d *PodmanDeployer) updateServiceValuesWithEndpoint(
-	ctx context.Context,
-	svc *ServicePlan,
-	componentType string,
-	endpointData any,
-	serviceID string,
-) {
-	existingData, exists := svc.Values[componentType]
-	if !exists {
-		svc.Values[componentType] = endpointData
-
-		return
-	}
-
-	existingMap, isMap := existingData.(map[string]any)
-	if !isMap {
-		svc.Values[componentType] = endpointData
-
-		return
-	}
-
-	endpointMap, isEndpointMap := endpointData.(map[string]any)
-	if isEndpointMap {
-		maps.Copy(existingMap, endpointMap)
-		logger.InfofCtx(ctx, "Updated component %s host/port in service %s\n", componentType, serviceID)
-	}
-}
-
 // deployComponentPods deploys all pods for a component and extracts endpoint information.
-// The rendering, Spyre env injection and pod creation are shared with the model deployment
-// path via podmanutils.DeployComponentPods.
+// The rendering and pod creation are shared with the model deployment path via
+// podmanutils.DeployComponentPods. Models are the only components that need accelerator cards
+// and they deploy through the models path, so no Spyre pool is passed here.
 func (d *PodmanDeployer) deployComponentPods(
 	ctx context.Context,
 	comp *ComponentPlan,
 	metadata *templates.AppMetadata,
 	tmpls map[string]*template.Template,
-	plan *DeploymentPlan,
 ) error {
 	componentEndpoints, err := podmanutils.DeployComponentPods(ctx, podmanutils.ComponentPodsParams{
 		Runtime:       d.runtime,
@@ -515,7 +374,6 @@ func (d *PodmanDeployer) deployComponentPods(
 		Values:        comp.Values,
 		Metadata:      metadata,
 		Templates:     tmpls,
-		SpyrePool:     plan.SpyreCardPool,
 		BaseDir:       d.getBaseDir(),
 	})
 	if err != nil {

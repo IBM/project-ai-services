@@ -4,6 +4,10 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
 // PublicKeyAlias returns the alias of the public LiteLLM key of a model, "<model>-<id>", where id is the
@@ -11,6 +15,61 @@ import (
 func PublicKeyAlias(model string, id uuid.UUID) string {
 	return fmt.Sprintf("%s-%s", model, id)
 }
+
+// InternalKeyAlias returns the alias of the internal LiteLLM key an application's services use to
+// reach a model, "<model>-<id>-app-<appSlug>": the public key's alias with the application's
+// instance slug added, where id is the component or connector ID. An application has one such key
+// per model it uses, so revoking it on deletion must use this one alias. It differs from
+// PublicKeyAlias, so an internal key never replaces or revokes the public one.
+func InternalKeyAlias(model string, id uuid.UUID, appSlug string) string {
+	return fmt.Sprintf("%s-app-%s", PublicKeyAlias(model, id), appSlug)
+}
+
+// Address is where the services of an application reach the model gateway.
+type Address struct {
+	Host string
+	Port string
+	// PathPrefix is the URL prefix of the gateway on that host: empty when the services reach the
+	// gateway directly, "/litellm" when they reach it through their worker's Caddy private egress.
+	PathPrefix string
+}
+
+// GatewayAddress returns where the services of an application on the given runtime reach the
+// gateway.
+//   - OpenShift: the gateway's service, by its cluster-wide name.
+//   - Podman, on the control plane's own worker: the gateway pod, by name.
+//   - Podman, on a remote worker: the worker's own Caddy private egress, which forwards
+//     /litellm over mTLS to the control plane's private ingress (see workerconstants.LiteLLMPathPrefix).
+//     The worker's network cannot resolve the gateway pod, so this is the only way to reach it.
+//
+// TODO(litellm): a remote OpenShift worker has no Caddy to egress through, so its services still
+// get the gateway's cluster-wide service name, which only resolves in the control plane's cluster.
+func GatewayAddress(runtime runtimeTypes.RuntimeType, remoteWorker bool) Address {
+	switch {
+	case runtime == runtimeTypes.RuntimeTypeOpenShift:
+		return Address{Host: constants.LiteLLMServiceHost, Port: constants.LiteLLMPort}
+	case remoteWorker:
+		return Address{
+			Host:       workerconstants.WorkerCaddyPodName,
+			Port:       proxy.PrivateEgressPort,
+			PathPrefix: workerconstants.LiteLLMPathPrefix,
+		}
+	default:
+		return Address{Host: constants.LiteLLMPodName, Port: constants.LiteLLMPort}
+	}
+}
+
+// TokenizeEndpoint returns the URL of the /tokenize passthrough on the gateway for the model
+// deployment id. The passthrough is named after the component ID (the route's Tag), so each
+// deployment is tokenized by its own model's tokenizer.
+func (g Address) TokenizeEndpoint(id uuid.UUID) string {
+	return fmt.Sprintf("http://%s:%s%s/tokenize/%s", g.Host, g.Port, g.PathPrefix, id)
+}
+
+// ParamAPIBase is the litellm_params key of the model endpoint. It is the only provider param
+// the platform interprets itself (to derive the /tokenize target); every other param is
+// forwarded to LiteLLM untouched.
+const ParamAPIBase = "api_base"
 
 // Route describes how one model is exposed through the LiteLLM gateway. Both local pods and remote
 // connectors are described by a route, so they share the same register/probe/rollback logic.

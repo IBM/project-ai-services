@@ -22,7 +22,8 @@ def calculate_dynamic_max_response_tokens(
     llm_endpoint: str,
     base_max_response_tokens: int,
     multiplier: float,
-    system_max_query_length: int
+    system_max_query_length: int,
+    api_key: str | None,
 ) -> int:
     """
     Calculate dynamic max_response_tokens for query rephrasing based on input query length.
@@ -33,12 +34,13 @@ def calculate_dynamic_max_response_tokens(
         base_max_response_tokens: Minimum baseline max_response_tokens (from config)
         multiplier: Multiplier for expansion (e.g., 1.2 = 20% expansion)
         system_max_query_length: System-wide max query token length
+        api_key: Key to tokenize with, the one of the user the request is made for
     
     Returns:
         Calculated max_response_tokens value
     """
     try:
-        input_tokens = tokenize_with_llm(query, llm_endpoint)
+        input_tokens = tokenize_with_llm(query, llm_endpoint, api_key)
         input_token_count = len(input_tokens)
         
         dynamic_max = int(input_token_count * multiplier)
@@ -272,7 +274,8 @@ async def rephrase_query_with_context(
             llm_endpoint=llm_endpoint,
             base_max_response_tokens=settings.query_rephrasing.max_response_tokens,
             multiplier=settings.query_rephrasing.max_response_tokens_multiplier,
-            system_max_query_length=settings.chatbot.max_query_token_length
+            system_max_query_length=settings.chatbot.max_query_token_length,
+            api_key=api_key,
         )
         
         # Call LLM for rephrasing with dynamic max_response_tokens

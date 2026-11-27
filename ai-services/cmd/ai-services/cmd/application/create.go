@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"maps"
 	"strings"
 	"text/template"
 	"time"
@@ -16,10 +15,10 @@ import (
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
-	apiModels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/appcreate"
 	appFlags "github.com/project-ai-services/ai-services/internal/pkg/cli/constants/application"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -34,10 +33,8 @@ import (
 
 const (
 	// Polling configuration.
-	pollInterval       = 20 * time.Second
-	pollTimeout        = 20 * time.Minute
-	paramSplitParts    = 2
-	expectedParamParts = 2
+	pollInterval = 20 * time.Second
+	pollTimeout  = 20 * time.Minute
 )
 
 // Variables for flags placeholder.
@@ -46,6 +43,7 @@ var (
 	templateName string
 	rawArgParams []string
 	argParams    map[string]string
+	rawArgModels []string
 	legacyCreate bool
 	workerName   string
 
@@ -137,17 +135,23 @@ Arguments:
 }
 
 func createExample() string {
-	return `  # Deploy using the local worker
+	return `  # Deploy using the local worker, with the models the template recommends
   ai-services application create rag --template rag
 
   # Deploy to a specific remote worker
   ai-services application create rag --template rag --worker node-1
 
-  # Deploy with extra parameters
-  ai-services application create rag --template rag --params reranker.vllm-cpu=true
+  # Deploy a new model from the catalog for a component type
+  ai-services application create rag --template rag --model llm=ibm-granite/granite-4.1-8b-fp8
 
-  # Deploy in CPU mode
+  # Reuse a registered model by its name; a remote model is attached as a connector
+  ai-services application create rag --template rag --model llm=my-granite --model reranker=my-reranker
+
+  # Deploy in CPU mode: the provider is chosen with --params, and each model is the provider's default
   ai-services application create rag --template rag --params reranker.vllm-cpu=true,llm.vllm-cpu=true
+
+  # Choose the provider with --params and the model with --model
+  ai-services application create rag --template rag --params llm.vllm-cpu=true --model llm=ibm-granite/granite-4.1-8b-fp8
 
   # Deploy with legacy mode (requires --runtime)
   ai-services application create rag --template rag --legacy --runtime podman`
@@ -182,6 +186,23 @@ func initCreateCommonFlags() {
 			"- Use \"ai-services application templates\" to view the list of supported parameters\n\n"+
 			"Precedence:\n"+
 			"- When both --values and --params are provided, --params overrides --values\n",
+	)
+
+	createCmd.Flags().StringSliceVar(
+		&rawArgModels,
+		appFlags.Create.Model,
+		[]string{},
+		"Model to use for a component type of the application. Repeatable or comma-separated.\n\n"+
+			"Format: --model <component_type>=<model>\n"+
+			"- Example: --model llm=ibm-granite/granite-4.1-8b-fp8\n\n"+
+			"<model> is looked up in this order:\n"+
+			"- a catalog model ID: deploys that model anew\n"+
+			"- the name of a registered model: reuses it; it must be running (local) or connected (remote).\n"+
+			"  A remote model is attached as a connector\n\n"+
+			"The provider is chosen with --params, e.g. --params llm.vllm-cpu=true. Without --model, a component\n"+
+			"type uses the model the template recommends for its provider, else the provider's default model.\n"+
+			"A provider cannot be chosen for a registered model: it brings its own.\n"+
+			"Use \"ai-services application templates models --template <template>\" to see the component types and their models.\n",
 	)
 
 	createCmd.Flags().StringArrayVarP(
@@ -273,6 +294,7 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 		AddCommonFlag(appFlags.Create.SkipValidation, cmdcommon.ValidateSkipChecksFlag).
 		AddCommonFlag(appFlags.Create.Template, validateTemplateFlag).
 		AddCommonFlag(appFlags.Create.Params, validateParamsFlag).
+		AddCommonFlag(appFlags.Create.Model, validateModelFlag).
 		AddCommonFlag(appFlags.Create.Values, validateValuesFlag).
 		AddCommonFlag(appFlags.Create.Legacy, nil)
 
@@ -363,6 +385,18 @@ func validateImagePullPolicyFlag(cmd *cobra.Command) error {
 	return nil
 }
 
+// validateModelFlag validates the --model flag. It only checks the syntax; the models are
+// resolved against the catalog when the application is created.
+func validateModelFlag(cmd *cobra.Command) error {
+	if legacyCreate {
+		return fmt.Errorf("--%s is not supported with --legacy", appFlags.Create.Model)
+	}
+
+	_, err := appcreate.ParseModelFlags(rawArgModels)
+
+	return err
+}
+
 func createApp(ctx context.Context, appName string) error {
 	// 1. Initialize catalog client
 	appClient, err := catalogClient.NewApplicationClient(ctx)
@@ -376,17 +410,17 @@ func createApp(ctx context.Context, appName string) error {
 	}
 
 	// 3. Build the catalog API payload
-	payload, err := buildCatalogPayload(ctx, appClient, appName)
+	built, err := buildCatalogPayload(ctx, appClient, appName)
 	if err != nil {
 		return err
 	}
 
 	// 4. Create application via catalog API
 	logger.Infof("Creating application '%s' using template '%s'...\n", appName, templateName)
-	var resp *apiModels.CreateApplicationResponse
+	var resp *catalogClient.CreateApplicationResponse
 	err = utils.Retry(ctx, vars.RetryCount, vars.RetryInterval, nil, func() error {
 		var createErr error
-		resp, createErr = appClient.CreateApplication(ctx, payload)
+		resp, createErr = appClient.CreateApplication(ctx, built)
 
 		return createErr
 	})
@@ -417,7 +451,7 @@ func checkApplicationExists(ctx context.Context, appClient *catalogClient.Applic
 // buildCatalogPayload builds the catalog API payload for the given template.
 // It uses CatalogSource so that custom bundle templates (not in the embedded catalog)
 // are resolved via the catalog API.
-func buildCatalogPayload(ctx context.Context, appClient *catalogClient.ApplicationClient, appName string) (*apiModels.CreateApplicationRequest, error) {
+func buildCatalogPayload(ctx context.Context, appClient *catalogClient.ApplicationClient, appName string) (*catalogClient.CreateApplicationRequest, error) {
 	source, err := catalogClient.NewCatalogSource(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialise catalog source: %w", err)
@@ -429,18 +463,62 @@ func buildCatalogPayload(ctx context.Context, appClient *catalogClient.Applicati
 		return nil, err
 	}
 
+	modelClient, err := catalogClient.NewModelClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create model client: %w", err)
+	}
+
+	models, err := appcreate.ParseModelFlags(rawArgModels)
+	if err != nil {
+		return nil, err
+	}
+
+	builder := appcreate.NewBuilder(appClient, appcreate.NewModelResolver(modelClient), appcreate.Options{
+		Runtime:    deployRT,
+		WorkerName: workerName,
+		Params:     argParams,
+		Models:     models,
+	})
+
 	// Try architecture first; fall through to service on not-found.
 	arch, err := source.LoadArchitecture(ctx, templateName)
 	if err == nil {
-		return buildArchitecturePayload(ctx, appClient, source, arch, appName, deployRT)
+		return builder.BuildArchitecture(ctx, arch, appName)
 	}
 
 	svc, err := source.LoadService(ctx, templateName)
 	if err == nil {
-		return buildServicePayload(ctx, appClient, svc.ID, appName, deployRT)
+		return builder.BuildService(ctx, svc.ID, appName)
 	}
 
 	return nil, fmt.Errorf("template '%s' not found as architecture or service", templateName)
+}
+
+// resolveDeployRuntimeType returns the RuntimeType for the target worker by
+// querying the catalog. The worker must be registered and connected; an error
+// is returned otherwise so that the create call fails fast before any API work.
+func resolveDeployRuntimeType(ctx context.Context) (runtimeTypes.RuntimeType, error) {
+	wc, err := catalogClient.NewWorkerClient(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to create worker client: %w", err)
+	}
+
+	workers, err := wc.ListWorkers(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to list workers: %w", err)
+	}
+
+	for _, w := range workers {
+		if strings.EqualFold(w.Name, workerName) {
+			if w.RuntimeType == "" {
+				return "", fmt.Errorf("worker %q has no runtime type", workerName)
+			}
+
+			return runtimeTypes.RuntimeType(w.RuntimeType), nil
+		}
+	}
+
+	return "", fmt.Errorf("worker %q is not registered or not connected; run 'worker join' first", workerName)
 }
 
 // pollApplicationStatus polls the application status until it's ready or fails.
@@ -609,406 +687,3 @@ func printNextStepsMD(tmpls map[string]*template.Template, params map[string]str
 
 	return nil
 }
-
-// resolveDeployRuntimeType returns the RuntimeType for the target worker by
-// querying the catalog. The worker must be registered and connected; an error
-// is returned otherwise so that the create call fails fast before any API work.
-func resolveDeployRuntimeType(ctx context.Context) (runtimeTypes.RuntimeType, error) {
-	wc, err := catalogClient.NewWorkerClient(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to create worker client: %w", err)
-	}
-
-	workers, err := wc.ListWorkers(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to list workers: %w", err)
-	}
-
-	for _, w := range workers {
-		if strings.EqualFold(w.Name, workerName) {
-			if w.RuntimeType == "" {
-				return "", fmt.Errorf("worker %q has no runtime type", workerName)
-			}
-
-			return runtimeTypes.RuntimeType(w.RuntimeType), nil
-		}
-	}
-
-	return "", fmt.Errorf("worker %q is not registered or not connected; run 'worker join' first", workerName)
-}
-
-// buildArchitecturePayload builds the payload for an architecture deployment.
-func buildArchitecturePayload(ctx context.Context, appClient *catalogClient.ApplicationClient, _ catalogClient.CatalogSource, arch *catalogTypes.Architecture, appName string, deployRT runtimeTypes.RuntimeType) (*apiModels.CreateApplicationRequest, error) {
-	// Get deploy options for the architecture, scoped to the target runtime.
-	deployOptions, err := appClient.GetArchitectureDeployOptions(ctx, arch.ID, string(deployRT))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get deploy options: %w", err)
-	}
-
-	// Build services list using deploy options
-	services := make([]apiModels.Service, 0, len(arch.Services))
-	for _, svcRef := range arch.Services {
-		// Find the corresponding deploy options service
-		var svcDeployOpts *catalogTypes.DeployOptionsService
-		for i := range deployOptions.Services {
-			if deployOptions.Services[i].ID == svcRef.ID {
-				svcDeployOpts = &deployOptions.Services[i]
-
-				break
-			}
-		}
-
-		if svcDeployOpts == nil {
-			return nil, fmt.Errorf("deploy options not found for service '%s'", svcRef.ID)
-		}
-
-		svc, err := buildServiceEntryWithDeployOptions(ctx, appClient, svcRef.ID, svcDeployOpts, deployRT)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build service '%s': %w", svcRef.ID, err)
-		}
-		services = append(services, svc)
-	}
-
-	return &apiModels.CreateApplicationRequest{
-		CatalogID:  arch.ID,
-		Name:       appName,
-		Services:   services,
-		Version:    arch.Version,
-		WorkerName: workerName,
-	}, nil
-}
-
-// buildServicePayload builds the payload for a standalone service deployment.
-func buildServicePayload(ctx context.Context, appClient *catalogClient.ApplicationClient, serviceID, appName string, deployRT runtimeTypes.RuntimeType) (*apiModels.CreateApplicationRequest, error) {
-	// Get deploy options for the service, scoped to the target runtime.
-	deployOptions, err := appClient.GetServiceDeployOptions(ctx, serviceID, string(deployRT))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get deploy options: %w", err)
-	}
-
-	svc, err := buildServiceEntryWithDeployOptions(ctx, appClient, serviceID, deployOptions, deployRT)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build service: %w", err)
-	}
-
-	return &apiModels.CreateApplicationRequest{
-		CatalogID:  serviceID,
-		Name:       appName,
-		Services:   []apiModels.Service{svc},
-		Version:    svc.Version,
-		WorkerName: workerName,
-	}, nil
-}
-
-// buildServiceEntryWithDeployOptions builds a single service entry with its components using deploy options.
-func buildServiceEntryWithDeployOptions(ctx context.Context, appClient *catalogClient.ApplicationClient, serviceID string, deployOptions *catalogTypes.DeployOptionsService, deployRT runtimeTypes.RuntimeType) (apiModels.Service, error) {
-	// Build components list from deploy options
-	components := make([]apiModels.Component, 0, len(deployOptions.Components))
-	for _, compDeployOpt := range deployOptions.Components {
-		// Get component configuration from argParams (provider-specific params)
-		providerParams := extractComponentParamsForService(serviceID, compDeployOpt.Type, argParams)
-
-		// Determine provider ID and get its params
-		providerID, userParams, err := selectProviderFromDeployOptions(compDeployOpt, providerParams)
-		if err != nil {
-			return apiModels.Service{}, err
-		}
-
-		if providerID == "" {
-			return apiModels.Service{}, fmt.Errorf("no provider found for component type '%s'", compDeployOpt.Type)
-		}
-
-		// Find the selected provider to get its version
-		var providerVersion string
-		var providerFound bool
-		for _, p := range compDeployOpt.Providers {
-			if p.ID == providerID {
-				providerVersion = p.Version
-				providerFound = true
-
-				break
-			}
-		}
-
-		// If provider not found in deploy options, return error
-		if !providerFound {
-			return apiModels.Service{}, fmt.Errorf("provider '%s' not found in deploy options for component type '%s'", providerID, compDeployOpt.Type)
-		}
-
-		// Fetch schema and apply defaults, merging with user params
-		componentParamsAny, err := applySchemaDefaults(ctx, appClient, compDeployOpt.Type, providerID, deployRT, userParams)
-		if err != nil {
-			logger.Warningf("Failed to apply schema defaults for %s/%s: %v\n", compDeployOpt.Type, providerID, err)
-			// Continue with user-provided params only
-			componentParamsAny = make(map[string]any)
-			for k, v := range userParams {
-				componentParamsAny[k] = v
-			}
-		}
-
-		components = append(components, apiModels.Component{
-			ComponentType: compDeployOpt.Type,
-			ProviderID:    providerID,
-			Params:        componentParamsAny,
-			Version:       providerVersion,
-		})
-	}
-
-	// Extract service-level parameters (excluding component params)
-	serviceParams := extractServiceParams(serviceID, deployOptions.Components, argParams)
-
-	return apiModels.Service{
-		CatalogID:  serviceID,
-		Components: components,
-		Params:     serviceParams,
-		Version:    deployOptions.Version,
-	}, nil
-}
-
-// extractServiceParams extracts service-level parameters from argParams, excluding component params.
-// Format: {serviceID}.{param} -> {param}.
-// Excludes: {serviceID}.{componentType}.{param} (those are component params).
-// Nested dot-notation keys (e.g. backend.systemPrompt) are expanded into nested maps.
-func extractServiceParams(serviceID string, components []catalogTypes.DeployOptionsComponent, allParams map[string]string) map[string]any {
-	serviceParams := make(map[string]any)
-	servicePrefix := serviceID + "."
-
-	// Build a set of component types for this service.
-	componentTypes := make(map[string]bool)
-	for _, comp := range components {
-		componentTypes[comp.Type] = true
-	}
-
-	for key, value := range allParams {
-		after, ok := strings.CutPrefix(key, servicePrefix)
-		if !ok {
-			continue
-		}
-
-		// Check if this is a component parameter by seeing if it starts with a known component type.
-		isComponentParam := isComponentParameter(after, componentTypes)
-
-		// Only add to service params if it's not a component param.
-		if !isComponentParam {
-			setNestedParam(serviceParams, after, value)
-		}
-	}
-
-	return serviceParams
-}
-
-// setNestedParam sets a value in a nested map using a dot-notation key.
-// e.g. setNestedParam(m, "backend.systemPrompt", "hello") → m["backend"]["systemPrompt"] = "hello".
-func setNestedParam(m map[string]any, dotKey string, value string) {
-	parts := strings.SplitN(dotKey, ".", paramSplitParts)
-	if len(parts) == 1 {
-		m[dotKey] = value
-
-		return
-	}
-
-	nested, ok := m[parts[0]].(map[string]any)
-	if !ok {
-		nested = make(map[string]any)
-		m[parts[0]] = nested
-	}
-
-	setNestedParam(nested, parts[1], value)
-}
-
-// isComponentParameter checks if a parameter belongs to a component.
-func isComponentParameter(param string, componentTypes map[string]bool) bool {
-	for compType := range componentTypes {
-		if strings.HasPrefix(param, compType+".") {
-			return true
-		}
-	}
-
-	return false
-}
-
-// extractComponentParamsForService extracts parameters for a specific component type from argParams.
-// Supports provider-specific params:
-// - Provider only: {componentType}.{providerID} (e.g., llm.vllm-cpu) - selects provider with defaults.
-// - Provider with params: {componentType}.{providerID}.{param} (e.g., llm.vllm-cpu.model).
-// - Service-specific: {serviceID}.{componentType}.{providerID}[.{param}] (e.g., chat.llm.vllm-cpu or chat.llm.vllm-cpu.model).
-// Returns a map with provider as key and params as value.
-// Warns if a provider is explicitly set to false with no other provider selected.
-func extractComponentParamsForService(serviceID string, componentType string, allParams map[string]string) map[string]map[string]string {
-	providerParams := make(map[string]map[string]string)
-	falseProviders := make(map[string]bool)
-
-	// Extract global component params: {componentType}.{providerID}[.{param}].
-	extractProviderParams(componentType+".", allParams, providerParams, falseProviders)
-
-	// Extract service-specific component params (these override global).
-	extractProviderParams(serviceID+"."+componentType+".", allParams, providerParams, falseProviders)
-
-	// Warn if any provider was explicitly set to false but no other provider was selected.
-	if len(falseProviders) > 0 && len(providerParams) == 0 {
-		for providerID := range falseProviders {
-			logger.Warningf("Provider '%s' for component type '%s' is set to 'false' but no other provider was specified; the default provider will be used\n", providerID, componentType)
-		}
-	}
-
-	return providerParams
-}
-
-// extractProviderParams extracts provider parameters from allParams with the given prefix.
-// For bare provider keys (e.g., llm.vllm-cpu=true/false):
-//   - "true" selects the provider.
-//   - "false" records the provider in falseProviders and skips it.
-//   - Any other value logs a warning and is treated as "false".
-func extractProviderParams(prefix string, allParams map[string]string, providerParams map[string]map[string]string, falseProviders map[string]bool) {
-	for key, value := range allParams {
-		after, ok := strings.CutPrefix(key, prefix)
-		if !ok {
-			continue
-		}
-
-		// Split to get providerID and optional param.
-		parts := strings.SplitN(after, ".", paramSplitParts)
-		if len(parts) < 1 {
-			continue
-		}
-
-		providerID := parts[0]
-
-		// Bare provider key (e.g., llm.vllm-cpu=true/false).
-		if len(parts) != expectedParamParts && !strings.EqualFold(value, "true") {
-			// Any value other than "true" opts out of this provider.
-			if !strings.EqualFold(value, "false") {
-				logger.Warningf("Invalid value '%s' for provider parameter '%s': expected 'true' or 'false', treating as 'false'\n", value, key)
-			}
-
-			falseProviders[providerID] = true
-
-			continue
-		}
-
-		// Ensure provider entry exists.
-		if providerParams[providerID] == nil {
-			providerParams[providerID] = make(map[string]string)
-		}
-
-		// Store nested param (e.g., llm.vllm-cpu.model=granite).
-		if len(parts) == expectedParamParts {
-			providerParams[providerID][parts[1]] = value
-		}
-	}
-}
-
-// selectProviderFromDeployOptions determines the provider ID for a component using deploy options.
-// Priority:
-// 1. User-specified provider (matched against deploy options).
-// 2. Default-marked provider.
-// 3. Provider is "vllm-spyre".
-// 4. First available provider.
-// Returns an error if multiple providers are explicitly selected for the same component type.
-func selectProviderFromDeployOptions(compDeployOpt catalogTypes.DeployOptionsComponent, providerParams map[string]map[string]string) (string, map[string]string, error) {
-	matchedProvider, defaultProvider, spyreProvider, firstProvider, err := collectProviderSelection(compDeployOpt, providerParams)
-	if err != nil {
-		return "", nil, err
-	}
-
-	if matchedProvider != "" {
-		return matchedProvider, providerParams[matchedProvider], nil
-	}
-
-	if defaultProvider != "" {
-		return defaultProvider, make(map[string]string), nil
-	}
-
-	if spyreProvider != "" {
-		return spyreProvider, make(map[string]string), nil
-	}
-
-	return firstProvider, make(map[string]string), nil
-}
-
-func collectProviderSelection(compDeployOpt catalogTypes.DeployOptionsComponent, providerParams map[string]map[string]string) (string, string, string, string, error) {
-	var matchedProvider string
-	var defaultProvider string
-	var spyreProvider string
-	var firstProvider string
-
-	for _, p := range compDeployOpt.Providers {
-		if firstProvider == "" {
-			firstProvider = p.ID
-		}
-
-		if spyreProvider == "" && p.ID == "vllm-spyre" {
-			spyreProvider = p.ID
-		}
-
-		if p.Default {
-			defaultProvider = p.ID
-		}
-
-		if _, selected := providerParams[p.ID]; !selected {
-			continue
-		}
-
-		if matchedProvider != "" {
-			return "", "", "", "", fmt.Errorf(
-				"multiple providers specified for component type '%s': '%s' and '%s'. "+
-					"Only one provider can be selected per component type",
-				compDeployOpt.Type, matchedProvider, p.ID)
-		}
-
-		matchedProvider = p.ID
-	}
-
-	return matchedProvider, defaultProvider, spyreProvider, firstProvider, nil
-}
-
-// applySchemaDefaults fetches the component provider schema and applies default values.
-// User-provided params override defaults.
-func applySchemaDefaults(ctx context.Context, appClient *catalogClient.ApplicationClient, componentType, providerID string, rt runtimeTypes.RuntimeType, userParams map[string]string) (map[string]any, error) {
-	// Fetch schema from API
-	schema, err := appClient.GetComponentProviderParams(ctx, componentType, providerID, string(rt))
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch schema: %w", err)
-	}
-
-	// Extract defaults from schema
-	defaults := extractDefaultsFromSchema(schema)
-
-	// Merge: start with defaults, override with user params
-	result := make(map[string]any)
-	maps.Copy(result, defaults)
-
-	// Override with user-provided params (excluding 'provider' key)
-	// Support nested parameters using dot notation (e.g., auth.password)
-	for k, v := range userParams {
-		if k != "provider" {
-			setNestedParam(result, k, v)
-		}
-	}
-
-	return result, nil
-}
-
-// extractDefaultsFromSchema extracts default values from a JSON schema.
-func extractDefaultsFromSchema(schema map[string]any) map[string]any {
-	defaults := make(map[string]any)
-
-	// Check if schema has properties
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		return defaults
-	}
-
-	// Extract default value for each property
-	for propName, propValue := range properties {
-		if propMap, ok := propValue.(map[string]any); ok {
-			if defaultValue, hasDefault := propMap["default"]; hasDefault {
-				defaults[propName] = defaultValue
-			}
-		}
-	}
-
-	return defaults
-}
-
-// Made with Bob

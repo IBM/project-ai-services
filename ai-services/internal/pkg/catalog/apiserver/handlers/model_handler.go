@@ -88,9 +88,9 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Param			component_type	query		string		false	"Filter by model role (e.g. llm, embedding, reranker)"
 //	@Param			deployment_type	query		string		false	"Filter by kind: 'local' or 'remote'"
-//	@Param			provider_id		query		[]string	false	"Filter by provider (e.g. vllm-spyre, watsonx); repeat the parameter to match any of several"	collectionFormat(multi)
-//	@Param			model			query		[]string	false	"Filter by model identifier; repeat the parameter to match any of several"						collectionFormat(multi)
-//	@Param			status			query		string		false	"Filter by status: Downloading, Deploying, Running, Error (local) or connected, offline (remote)"
+//	@Param			provider_id		query		[]string	false	"Filter by provider (e.g. vllm-spyre, watsonx); repeat the parameter to match any of several"													collectionFormat(multi)
+//	@Param			model			query		[]string	false	"Filter by model identifier; repeat the parameter to match any of several"																		collectionFormat(multi)
+//	@Param			status			query		[]string	false	"Filter by status: Downloading, Deploying, Running, Error (local) or connected, offline (remote); repeat the parameter to match any of several"	collectionFormat(multi)
 //	@Param			q				query		string		false	"Case-insensitive substring search on model name"
 //	@Param			page			query		int			false	"Page number (1-indexed)"				default(1)
 //	@Param			page_size		query		int			false	"Number of items per page (max: 100)"	default(20)
@@ -119,7 +119,7 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 		DeploymentType: constants.DeploymentType(c.Query("deployment_type")),
 		ProviderIDs:    queryValues(c, "provider_id"),
 		Models:         queryValues(c, "model"),
-		Status:         c.Query("status"),
+		Statuses:       queryValues(c, "status"),
 		Search:         c.Query("q"),
 		CreatedBy:      userID,
 	})

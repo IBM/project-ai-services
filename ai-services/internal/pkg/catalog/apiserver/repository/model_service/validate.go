@@ -2,12 +2,10 @@ package modelservice
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -50,6 +48,10 @@ func statusesFor(deploymentType constants.DeploymentType) []string {
 // the name, and the component type, model and provider against the catalog's deploy options.
 // Failures are 400s that say what is available.
 func (s *ModelService) validateCreateRequest(ctx context.Context, req apimodels.CreateModelRequest) error {
+	if err := s.ensureNameIsNotCatalogModel(req.Name); err != nil {
+		return err
+	}
+
 	if err := validators.ValidateResourceName("Model name", req.Name); err != nil {
 		return err
 	}
@@ -58,42 +60,23 @@ func (s *ModelService) validateCreateRequest(ctx context.Context, req apimodels.
 		return err
 	}
 
-	options, err := s.catalogProvider.GetModelDeployOptions(ctx, req.Model, "")
-	if errors.Is(err, catalog.ErrModelNotFound) {
-		return validators.BadRequest("invalid model %q; it is not in the catalog", req.Model)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to get deploy options of model %q: %w", req.Model, err)
-	}
-
-	return checkDeployOptions(req, options)
+	return validators.ValidateModelDeployable(ctx, s.catalogProvider, req.Model, req.ComponentType, req.ProviderID, req.DeploymentType)
 }
 
-// checkDeployOptions checks that the model described by options can serve the component type of
-// the request and be deployed with its provider and deployment type.
-func checkDeployOptions(req apimodels.CreateModelRequest, options *types.ModelDeployOptions) error {
-	if options.ComponentType.ID != req.ComponentType {
-		return validators.BadRequest("model %q cannot be used as component_type %q; it is a model of component_type: %s",
-			req.Model, req.ComponentType, options.ComponentType.ID)
+// ensureNameIsNotCatalogModel rejects a name equal to the ID of a catalog model, so that a model
+// name given to --model of 'application create' never also names a catalog model. Names are
+// compared without regard to case, as they are when uniqueness is checked.
+func (s *ModelService) ensureNameIsNotCatalogModel(name string) error {
+	catalogModels, err := s.catalogProvider.GetModels()
+	if err != nil {
+		return fmt.Errorf("failed to list catalog models: %w", err)
 	}
 
-	if len(options.Providers) == 0 {
-		return validators.BadRequest("model %q is not available for any provider", req.Model)
+	if slices.ContainsFunc(catalogModels, func(m types.Model) bool { return strings.EqualFold(m.ID, name) }) {
+		return validators.BadRequest("Model name %q is the ID of a catalog model; choose another name", name)
 	}
 
-	offered := make([]string, 0, len(options.Providers))
-
-	for _, p := range options.Providers {
-		if p.ID == req.ProviderID && p.DeploymentType == req.DeploymentType {
-			return nil
-		}
-
-		offered = append(offered, fmt.Sprintf("%s (%s)", p.ID, p.DeploymentType))
-	}
-
-	return validators.BadRequest("model %q is not available for %s provider %q; it is offered by: %s",
-		req.Model, req.DeploymentType, req.ProviderID, strings.Join(offered, ", "))
+	return nil
 }
 
 // ensureNameAvailable rejects a name already used by a local model (component) or a remote
@@ -121,7 +104,7 @@ func (s *ModelService) ensureNameAvailable(ctx context.Context, name string) err
 // validateListRequest rejects filters that can never match: a deployment type that is neither
 // local nor remote, a provider or model the catalog does not know, or a status no model can have.
 // Empty filters are not applied and so not checked; of the multi-value filters, every value must
-// be valid. The providers and the status are checked against those of the requested deployment
+// be valid. The providers and the statuses are checked against those of the requested deployment
 // type, if any: status=connected&deployment_type=local can never match.
 //
 // component_type is not validated yet.
@@ -138,11 +121,7 @@ func (s *ModelService) validateListRequest(req apimodels.ListModelsRequest) erro
 		return err
 	}
 
-	if statuses := statusesFor(req.DeploymentType); req.Status != "" && !slices.Contains(statuses, req.Status) {
-		return validators.BadRequest("invalid status %q; must be one of: %s", req.Status, strings.Join(statuses, ", "))
-	}
-
-	return nil
+	return requireKnown("status", req.Statuses, statusesFor(req.DeploymentType))
 }
 
 // validateProviderIDs checks that every provider is one the catalog offers for the deployment type.

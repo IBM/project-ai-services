@@ -4,6 +4,7 @@ metadata:
   name: "similarity-api-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
+    ai-services.io/secret: "embedding-{{ .Values.embedding.instanceSlug }}-secret-key-{{ .InstanceSlug }},reranker-{{ .Values.reranker.instanceSlug }}-secret-key-{{ .InstanceSlug }}"
   annotations:
     ai-services.io/routes: "7000:similarity-api-{{ .InstanceSlug }}:api,7001:similarity-mcp-{{ .InstanceSlug }}:mcp"
     # ai-services.io/ports: "{{ or .Values.similarity.port }}:7000"  # Uncomment to expose ports directly (bypasses Caddy)
@@ -13,6 +14,12 @@ spec:
     - name: opensearch-secret
       secret:
         secretName: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
+    - name: embedding-secret-key
+      secret:
+        secretName: "embedding-{{ .Values.embedding.instanceSlug }}-secret-key-{{ .InstanceSlug }}"
+    - name: reranker-secret-key
+      secret:
+        secretName: "reranker-{{ .Values.reranker.instanceSlug }}-secret-key-{{ .InstanceSlug }}"
   containers:
     - name: similarity-api
       image: "{{ .Values.similarity.image }}"
@@ -23,6 +30,8 @@ spec:
         - |
           export OPENSEARCH_USERNAME=$(cat /etc/secret/opensearch-secret/username)
           export OPENSEARCH_PASSWORD=$(cat /etc/secret/opensearch-secret/password)
+          export EMB_API_KEY=$(cat /etc/secret/embedding-secret-key/key)
+          export RERANKER_API_KEY=$(cat /etc/secret/reranker-secret-key/key)
           exec /var/venv/bin/python -m uvicorn app:app \
             --host 0.0.0.0 \
             --port 7000 \
@@ -32,13 +41,17 @@ spec:
         - name: PORT
           value: "7000"
         - name: EMB_ENDPOINT
-          value: "http://{{ .Values.embedding.host }}:{{ .Values.embedding.port }}"
+          value: "http://{{ .Values.embedding.host }}:{{ .Values.embedding.port }}{{ .Values.embedding.path }}"
+        - name: EMB_TOKENIZE_ENDPOINT
+          value: "{{ .Values.embedding.tokenize_endpoint }}"
         - name: EMB_MODEL
           value: "{{ .Values.embedding.model }}"
         - name: EMB_MAX_MODEL_LEN
           value: "{{ .Values.embedding.maxModelLen }}"
         - name: RERANKER_ENDPOINT
-          value: "http://{{ .Values.reranker.host }}:{{ .Values.reranker.port }}"
+          value: "http://{{ .Values.reranker.host }}:{{ .Values.reranker.port }}{{ .Values.reranker.path }}"
+        - name: RERANKER_TOKENIZE_ENDPOINT
+          value: "{{ .Values.reranker.tokenize_endpoint }}"
         - name: RERANKER_MODEL
           value: "{{ .Values.reranker.model }}"
         - name: OPENSEARCH_HOST
@@ -70,6 +83,12 @@ spec:
       volumeMounts:
         - mountPath: /etc/secret/opensearch-secret
           name: opensearch-secret
+          readOnly: true
+        - mountPath: /etc/secret/embedding-secret-key
+          name: embedding-secret-key
+          readOnly: true
+        - mountPath: /etc/secret/reranker-secret-key
+          name: reranker-secret-key
           readOnly: true
     - name: mcp-sidecar
       image: "{{ .Values.mcp.image }}"

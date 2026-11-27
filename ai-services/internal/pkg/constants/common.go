@@ -29,6 +29,7 @@ const (
 	SpyreVersion           = "v1alpha1"
 	SpyreKind              = "SpyreClusterPolicy"
 	SMTLevel               = 2
+	TemplateNoValue        = "<no value>" // TemplateNoValue is the placeholder string produced by Go text/template when a field is missing.
 )
 
 const (

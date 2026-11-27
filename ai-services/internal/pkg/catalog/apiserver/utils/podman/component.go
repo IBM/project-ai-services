@@ -7,6 +7,7 @@ import (
 	"text/template"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/accelerator"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -214,11 +215,10 @@ type SpyreDiscoverer interface {
 	FindFreeSpyreCards(ctx context.Context) ([]string, error)
 }
 
-// NewSpyreCardPool discovers the free Spyre cards on the target host and returns a pool of them.
-// Discovery is delegated to the runtime when it implements SpyreDiscoverer (e.g. RemoteRuntime
-// querying over gRPC, or a MockRuntime in tests), otherwise falling back to local host discovery.
-// Callers must only call this when required > 0.
-func NewSpyreCardPool(ctx context.Context, rt runtime.Runtime, required int) (*deploymenttypes.SpyreCardPool, error) {
+// findFreeSpyreCards returns the free Spyre PCI addresses on the target host. Discovery is
+// delegated to the runtime when it implements SpyreDiscoverer (e.g. RemoteRuntime querying over
+// gRPC, or a MockRuntime in tests), otherwise falling back to local host discovery.
+func findFreeSpyreCards(ctx context.Context, rt runtime.Runtime) ([]string, error) {
 	var (
 		pciAddresses []string
 		err          error
@@ -231,6 +231,28 @@ func NewSpyreCardPool(ctx context.Context, rt runtime.Runtime, required int) (*d
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to find free Spyre cards: %w", err)
+	}
+
+	return pciAddresses, nil
+}
+
+// FreeAccelerators returns the accelerator cards, per type, that are free on the target host.
+// Support for another accelerator is added here.
+func FreeAccelerators(ctx context.Context, rt runtime.Runtime) (accelerator.Counts, error) {
+	spyreCards, err := findFreeSpyreCards(ctx, rt)
+	if err != nil {
+		return nil, err
+	}
+
+	return accelerator.Counts{accelerator.Spyre: len(spyreCards)}, nil
+}
+
+// NewSpyreCardPool discovers the free Spyre cards on the target host and returns a pool of them.
+// Callers must only call this when required > 0.
+func NewSpyreCardPool(ctx context.Context, rt runtime.Runtime, required int) (*deploymenttypes.SpyreCardPool, error) {
+	pciAddresses, err := findFreeSpyreCards(ctx, rt)
+	if err != nil {
+		return nil, err
 	}
 
 	available := len(pciAddresses)

@@ -6,8 +6,10 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/modelphase"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/podman"
+	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -25,15 +27,21 @@ type DeploymentExecutor struct {
 	componentRepo   repository.ComponentRepository
 	// workers resolves a RemoteRuntime for worker deployments.
 	workers worker.Resolver
+	// models runs the model phases of an application's model components, and points the services
+	// at the models through the model gateway.
+	models *modelphase.Runner
 }
 
-// NewDeploymentExecutor creates a new DeploymentExecutor instance.
+// NewDeploymentExecutor creates a new DeploymentExecutor instance. models runs the model
+// components of a plan and gives the services access to them; it may be nil when no plan has model
+// components.
 func NewDeploymentExecutor(
 	catalogProvider *catalog.CatalogProvider,
 	appRepo repository.ApplicationRepository,
 	serviceRepo repository.ServiceRepository,
 	componentRepo repository.ComponentRepository,
 	workers worker.Resolver,
+	models deploymenttypes.ModelManager,
 ) *DeploymentExecutor {
 	return &DeploymentExecutor{
 		catalogProvider: catalogProvider,
@@ -41,6 +49,7 @@ func NewDeploymentExecutor(
 		serviceRepo:     serviceRepo,
 		componentRepo:   componentRepo,
 		workers:         workers,
+		models:          modelphase.New(models),
 	}
 }
 
@@ -116,7 +125,7 @@ func (e *DeploymentExecutor) runPodmanDeployer(
 	req apimodels.CreateApplicationRequest,
 	rt runtime.Runtime,
 ) error {
-	deployer := podman.NewPodmanDeployer(rt, e.catalogProvider, e.appRepo, e.serviceRepo, e.componentRepo)
+	deployer := podman.NewPodmanDeployer(rt, e.catalogProvider, e.appRepo, e.serviceRepo, e.componentRepo, e.models)
 
 	return deployer.ExecuteDeployment(ctx, plan, req)
 }
@@ -129,7 +138,7 @@ func (e *DeploymentExecutor) runOpenShiftDeployer(
 	req apimodels.CreateApplicationRequest,
 	rt runtime.Runtime,
 ) error {
-	deployer := openshift.NewOpenShiftDeployer(rt, e.catalogProvider, e.appRepo, e.serviceRepo, e.componentRepo)
+	deployer := openshift.NewOpenShiftDeployer(rt, e.catalogProvider, e.appRepo, e.serviceRepo, e.componentRepo, e.models)
 
 	return deployer.ExecuteDeployment(ctx, plan, req)
 }
@@ -153,6 +162,7 @@ func (e *DeploymentExecutor) executePodmanDeployment(
 		e.appRepo,
 		e.serviceRepo,
 		e.componentRepo,
+		e.models,
 	)
 
 	// Execute deployment - handles both architectures and standalone services
@@ -180,6 +190,7 @@ func (e *DeploymentExecutor) executeOpenShiftDeployment(
 		e.appRepo,
 		e.serviceRepo,
 		e.componentRepo,
+		e.models,
 	)
 
 	return deployer.ExecuteDeployment(ctx, plan, req)

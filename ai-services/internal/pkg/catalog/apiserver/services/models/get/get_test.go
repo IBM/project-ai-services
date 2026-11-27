@@ -21,7 +21,7 @@ import (
 type mockSvcDepRepo struct {
 	dbrepo.ServiceDependencyRepository
 	counts map[dbmodels.DependencyType]map[uuid.UUID]int
-	// countErr and linkedErr fail GetServiceCountByDependency and GetLinkedServiceEndpoints.
+	// countErr and linkedErr fail GetApplicationCountByDependency and GetLinkedServiceEndpoints.
 	countErr, linkedErr error
 	// linked is what GetLinkedServiceEndpoints returns per dependency type.
 	linked map[dbmodels.DependencyType][]dbrepo.LinkedServiceRow
@@ -31,7 +31,7 @@ type mockSvcDepRepo struct {
 	linkedCalls int
 }
 
-func (m *mockSvcDepRepo) GetServiceCountByDependency(_ context.Context, ids []uuid.UUID, t dbmodels.DependencyType) (map[uuid.UUID]int, error) {
+func (m *mockSvcDepRepo) GetApplicationCountByDependency(_ context.Context, ids []uuid.UUID, t dbmodels.DependencyType) (map[uuid.UUID]int, error) {
 	if m.asked == nil {
 		m.asked = map[dbmodels.DependencyType][]uuid.UUID{}
 	}
@@ -90,8 +90,8 @@ func TestGet_Local(t *testing.T) {
 			{ApplicationID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), ApplicationName: "alpha-app"},
 		},
 	}, counts: map[dbmodels.DependencyType]map[uuid.UUID]int{
-		// Three services across two applications: the count is of services, not applications.
-		dbmodels.DependencyTypeComponent: {id: 3},
+		// Three services across two applications: the count is of distinct applications.
+		dbmodels.DependencyTypeComponent: {id: 2},
 	}}
 
 	got, err := newGetterWithGateway(t, deps, testGatewayEndpoint).Detail(context.Background(), row)
@@ -112,7 +112,7 @@ func TestGet_Local(t *testing.T) {
 		{ID: "11111111-1111-1111-1111-111111111111", Name: "alpha-app"},
 		{ID: "22222222-2222-2222-2222-222222222222", Name: "zeta-app"},
 	}, got.Applications, "one entry per application, sorted by name")
-	assert.Equal(t, 3, got.ConnectedServices)
+	assert.Equal(t, 2, got.ConnectedServices, "two distinct applications, not three services")
 	assert.Equal(t, created, got.CreatedAt)
 }
 
@@ -148,7 +148,7 @@ func TestGet_Remote(t *testing.T) {
 		dbmodels.DependencyTypeComponent: {{ApplicationID: uuid.New(), ApplicationName: "unrelated"}},
 	}, counts: map[dbmodels.DependencyType]map[uuid.UUID]int{
 		dbmodels.DependencyTypeConnector: {id: 1},
-		dbmodels.DependencyTypeComponent: {id: 9},
+		dbmodels.DependencyTypeComponent: {id: 9}, // ignored: remote model uses connector type
 	}}
 
 	got, err := newGetterWithGateway(t, deps, testGatewayEndpoint).Detail(context.Background(), row)
@@ -162,7 +162,7 @@ func TestGet_Remote(t *testing.T) {
 	assert.Equal(t, "https://us-south.ml.cloud.ibm.com", got.Params["api_base"])
 	require.Len(t, got.Applications, 1)
 	assert.Equal(t, "my-rag-app", got.Applications[0].Name)
-	assert.Equal(t, 1, got.ConnectedServices, "counted as a connector, never as a component")
+	assert.Equal(t, 1, got.ConnectedServices, "one application via connector dependency, component count is ignored")
 }
 
 func TestGet_NoApplicationsIsAnEmptyList(t *testing.T) {
@@ -196,7 +196,7 @@ func TestGet_RepositoryErrors(t *testing.T) {
 		deps *mockSvcDepRepo
 	}{
 		{"linked applications", &mockSvcDepRepo{linkedErr: boom}},
-		{"service count", &mockSvcDepRepo{countErr: boom}},
+		{"application count", &mockSvcDepRepo{countErr: boom}},
 	}
 
 	for _, tt := range tests {

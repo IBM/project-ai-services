@@ -40,7 +40,7 @@ func New(
 }
 
 // Detail returns the detail of a model, local or remote: the applications using it, the number of
-// services using it and its endpoint.
+// applications using it and its endpoint.
 //
 // The row must be one the caller may see: Detail does not check ownership.
 func (g *Getter) Detail(ctx context.Context, row *dbrepo.ModelRow) (*apimodels.ModelDetail, error) {
@@ -51,13 +51,13 @@ func (g *Getter) Detail(ctx context.Context, row *dbrepo.ModelRow) (*apimodels.M
 		return nil, err
 	}
 
-	counts, err := g.svcDepRepo.GetServiceCountByDependency(ctx, []uuid.UUID{row.ID}, depType)
+	counts, err := g.svcDepRepo.GetApplicationCountByDependency(ctx, []uuid.UUID{row.ID}, depType)
 	if err != nil {
-		return nil, fmt.Errorf("failed to count services using model: %w", err)
+		return nil, fmt.Errorf("failed to count applications using model: %w", err)
 	}
 
 	detail := &apimodels.ModelDetail{
-		ModelBase:    helpers.ToModelBase(*row, g.modelCatalog.ProviderNames(), g.modelCatalog.ComponentTypeInfos(), counts[row.ID]),
+		ModelBase:    helpers.ToModelBase(*row, g.modelCatalog.ProviderNames(), g.modelCatalog.ComponentTypeInfos(), g.modelCatalog.ProfileInfos(), counts[row.ID]),
 		Applications: applications,
 		Endpoints:    g.endpoints(),
 	}

@@ -1,23 +1,30 @@
 package types
 
 import (
+	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/google/uuid"
+	modeltypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 )
 
 // DeploymentPlan represents the complete deployment plan for an application.
 type DeploymentPlan struct {
 	ApplicationID   uuid.UUID                 // Generated application ID
 	ApplicationName string                    // Application name
+	CreatedBy       string                    // User creating the application; models it attaches to must be theirs
 	Namespace       string                    // Namespace derived from ApplicationID
 	CatalogID       string                    // Architecture or service catalog ID
 	Version         string                    // Application version from request
 	IsArchitecture  bool                      // true for architecture, false for standalone service
 	Components      map[string]*ComponentPlan // Key: component hash, Value: component plan
 	Services        map[string]*ServicePlan   // Key: service ID, Value: service plan
-	SpyreCardPool   *SpyreCardPool            // Allocated Spyre card pool (set after allocation)
 	// WorkerName identifies the target worker. Always set by PlanDeployment:
 	// workerconstants.LocalWorkerName for local deployments, or the actual
 	// worker name for remote ones.
@@ -28,6 +35,70 @@ type DeploymentPlan struct {
 	// PlanDeployment and used as the single source of truth by the executor and
 	// deployer, avoiding any implicit reads of vars.RuntimeFactory.
 	RuntimeType string
+
+	// valuesMu guards the values of the services while components deploy concurrently: every
+	// component writes the address it is reached at into the services that use it.
+	valuesMu sync.Mutex
+}
+
+// ModelComponents returns the components the model service deploys for this application, in a
+// stable order (by hash), so models are downloaded and started in the same order on every run.
+func (p *DeploymentPlan) ModelComponents() []*ComponentPlan {
+	var out []*ComponentPlan
+
+	for _, hash := range slices.Sorted(maps.Keys(p.Components)) {
+		if comp := p.Components[hash]; comp.Model != nil {
+			out = append(out, comp)
+		}
+	}
+
+	return out
+}
+
+// NonModelComponents returns the components a runtime deployer deploys itself, that is all but the
+// model components, which the model service handles.
+func (p *DeploymentPlan) NonModelComponents() map[string]*ComponentPlan {
+	out := make(map[string]*ComponentPlan, len(p.Components))
+
+	for hash, comp := range p.Components {
+		if !comp.IsModel() {
+			out[hash] = comp
+		}
+	}
+
+	return out
+}
+
+// ComponentIDs returns the database ID of every component of the plan by hash, which is what
+// catalogutils.RunConcurrently needs to deploy them concurrently and track their status.
+func (p *DeploymentPlan) ComponentIDs() map[string]uuid.UUID {
+	ids := make(map[string]uuid.UUID, len(p.Components))
+	for hash, comp := range p.Components {
+		ids[hash] = comp.DatabaseID
+	}
+
+	return ids
+}
+
+// ComponentStatusFunc returns a catalogutils.StatusFunc that moves a component of the plan to
+// status. It leaves the models alone: the model service reports their status itself, and an
+// existing instance, which the application only uses, is never touched.
+func (p *DeploymentPlan) ComponentStatusFunc(repo repository.ComponentRepository, status models.ComponentStatus) catalogutils.StatusFunc {
+	modelIDs := make(map[uuid.UUID]bool)
+
+	for _, comp := range p.Components {
+		if comp.IsModel() {
+			modelIDs[comp.DatabaseID] = true
+		}
+	}
+
+	return func(ctx context.Context, id uuid.UUID, msg string) error {
+		if modelIDs[id] {
+			return nil
+		}
+
+		return catalogutils.UpdateComponentStatus(ctx, repo, id, status, msg)
+	}
 }
 
 // ComponentPlan represents a single component deployment.
@@ -42,6 +113,24 @@ type ComponentPlan struct {
 	UsedByServices []string       // List of service IDs that use this component
 	Values         map[string]any // Structured values from LoadComponentValues
 	Endpoints      map[string]any // Extracted endpoints after deployment (populated by deployer)
+
+	// Model is the model service's plan for a model component (llm, embedding, reranker, ...) that
+	// is deployed by this application. The model service owns its records, download, deployment
+	// and status, so the deployer does not treat the component like any other. Nil for every other
+	// component, and for a model that already runs (see PreDeployed).
+	Model *modeltypes.LocalPlan
+	// PreDeployed marks a model component bound to an existing running instance: nothing is
+	// inserted or deployed, and DatabaseID is the instance's ID.
+	PreDeployed bool
+	// Remote marks a PreDeployed model that is a remote model connector: DatabaseID is the
+	// connector's ID, and services depend on it as a connector, not as a component.
+	Remote bool
+}
+
+// IsModel reports whether the component is a model handled by the model service, either one to
+// deploy (Model) or an existing instance (PreDeployed).
+func (c *ComponentPlan) IsModel() bool {
+	return c.Model != nil || c.PreDeployed
 }
 
 // ServicePlan represents a single service deployment.

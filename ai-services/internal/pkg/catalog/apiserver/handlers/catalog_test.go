@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -138,6 +139,7 @@ func validateRagArchitecture(t *testing.T, body []byte) {
 	assert.Equal(t, "architecture", arch.Type)
 	assert.Equal(t, "IBM", arch.CertifiedBy)
 	assert.Contains(t, arch.Runtimes, "podman")
+	assert.Contains(t, arch.Runtimes, "openshift")
 
 	assert.NotEmpty(t, arch.Services)
 	serviceIDs := make(map[string]bool)
@@ -559,6 +561,28 @@ func TestListCatalogModels(t *testing.T) {
 		for _, m := range filtered {
 			assert.Equal(t, "reranker", m.ComponentType.ID)
 		}
+	})
+
+	t.Run("deployment_type filter", func(t *testing.T) {
+		for _, dt := range []constants.DeploymentType{constants.DeploymentTypeLocal, constants.DeploymentTypeRemote} {
+			filtered := get("/api/v1/catalog/models?deployment_type=" + string(dt) + "&component_type=llm")
+			require.NotEmpty(t, filtered, dt)
+			for _, m := range filtered {
+				assert.Equal(t, "llm", m.ComponentType.ID)
+				require.NotEmpty(t, m.Providers, m.ID)
+				for _, pr := range m.Providers {
+					assert.Equal(t, dt, pr.DeploymentType, m.ID)
+				}
+			}
+		}
+	})
+
+	t.Run("unknown deployment_type is rejected", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/catalog/models?deployment_type=cloud", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "deployment_type")
 	})
 
 	t.Run("unknown component_type is rejected", func(t *testing.T) {

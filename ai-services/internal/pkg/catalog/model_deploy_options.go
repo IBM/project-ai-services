@@ -77,7 +77,7 @@ func (p *CatalogProvider) addModelProvider(ctx context.Context, result *types.Mo
 
 	models.SetInfo(result, model.Name, item.Component.ComponentType.ID)
 
-	// No profiles in models.yaml: a legacy per-app component (e.g. llm/watsonx), not deployable on its own.
+	// No profiles in models.yaml: not deployable locally.
 	if len(model.Profiles) == 0 {
 		return nil
 	}

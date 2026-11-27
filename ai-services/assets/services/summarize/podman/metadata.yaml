@@ -1,7 +1,7 @@
 name: summarize
 version: "1.0.0"
 podTemplateExecutions:
-  - [postgres-secret.yaml.tmpl]
+  - [postgres-secret.yaml.tmpl, llm-secret-key.yaml.tmpl]
   - [postgres.yaml.tmpl]
   - [summarize-api.yaml.tmpl]
 

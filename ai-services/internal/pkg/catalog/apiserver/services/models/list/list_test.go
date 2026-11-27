@@ -52,7 +52,7 @@ type mockSvcDepRepo struct {
 	asked map[dbmodels.DependencyType][]uuid.UUID
 }
 
-func (m *mockSvcDepRepo) GetServiceCountByDependency(_ context.Context, ids []uuid.UUID, t dbmodels.DependencyType) (map[uuid.UUID]int, error) {
+func (m *mockSvcDepRepo) GetApplicationCountByDependency(_ context.Context, ids []uuid.UUID, t dbmodels.DependencyType) (map[uuid.UUID]int, error) {
 	if m.asked == nil {
 		m.asked = map[dbmodels.DependencyType][]uuid.UUID{}
 	}
@@ -87,13 +87,13 @@ func TestList_PassesFiltersAndPaging(t *testing.T) {
 	_, err := svc.List(context.Background(), apimodels.ListModelsRequest{
 		Page: 3, PageSize: 10, CreatedBy: "alice", ComponentType: "llm",
 		DeploymentType: constants.DeploymentTypeLocal, ProviderIDs: []string{"vllm-spyre", "vllm-cpu"},
-		Models: []string{"ibm-granite/granite-3.3-8b-instruct", "ibm/granite-4-h-small"}, Status: "Running",
+		Models: []string{"ibm-granite/granite-3.3-8b-instruct", "ibm/granite-4-h-small"}, Statuses: []string{"Running"},
 	})
 	require.NoError(t, err)
 
 	want := &dbrepo.ModelFilters{
 		CreatedBy: "alice", DeploymentType: "local", ComponentType: "llm", Providers: []string{"vllm-spyre", "vllm-cpu"},
-		Models: []string{"ibm-granite/granite-3.3-8b-instruct", "ibm/granite-4-h-small"}, Status: "Running", Limit: 10, Offset: 20,
+		Models: []string{"ibm-granite/granite-3.3-8b-instruct", "ibm/granite-4-h-small"}, Statuses: []string{"Running"}, Limit: 10, Offset: 20,
 	}
 	assert.Equal(t, want, repo.listFilters)
 	assert.Equal(t, want, repo.countFilters, "count and list must filter identically")
@@ -166,6 +166,7 @@ func TestList_LocalAndRemoteItems(t *testing.T) {
 			},
 		},
 	}
+	// Two applications use the local model (via component); one uses the remote model (via connector).
 	deps := &mockSvcDepRepo{counts: map[dbmodels.DependencyType]map[uuid.UUID]int{
 		dbmodels.DependencyTypeComponent: {localID: 2},
 		dbmodels.DependencyTypeConnector: {remoteID: 1},
@@ -183,13 +184,13 @@ func TestList_LocalAndRemoteItems(t *testing.T) {
 	assert.NotEqual(t, "vllm-spyre", local.Provider.Name, "the display name comes from the catalog")
 	require.NotNil(t, local.Worker)
 	assert.Equal(t, types.ApplicationWorker{ID: "w-1", Name: "lpar-1", RuntimeType: "podman"}, *local.Worker)
-	assert.Equal(t, 2, local.ConnectedServices, "local models are counted as component dependencies")
+	assert.Equal(t, 2, local.ConnectedServices, "local models count distinct applications via component dependencies")
 
 	assert.Equal(t, constants.DeploymentTypeRemote, remote.DeploymentType)
 	assert.Nil(t, remote.Worker)
 	assert.Equal(t, "connected", remote.Status)
 	assert.Equal(t, "https://us-south.ml.cloud.ibm.com", remote.Params["api_base"])
-	assert.Equal(t, 1, remote.ConnectedServices, "remote models are counted as connector dependencies")
+	assert.Equal(t, 1, remote.ConnectedServices, "remote models count distinct applications via connector dependencies")
 
 	assert.Equal(t, []uuid.UUID{localID}, deps.asked[dbmodels.DependencyTypeComponent])
 	assert.Equal(t, []uuid.UUID{remoteID}, deps.asked[dbmodels.DependencyTypeConnector])
@@ -275,7 +276,7 @@ func TestList_RepositoryErrors(t *testing.T) {
 	}{
 		{"count", &mockModelRepo{countErr: boom}, &mockSvcDepRepo{}},
 		{"list", &mockModelRepo{total: 1, rows: rows, listErr: boom}, &mockSvcDepRepo{}},
-		{"service counts", &mockModelRepo{total: 1, rows: rows}, &mockSvcDepRepo{err: boom}},
+		{"application counts", &mockModelRepo{total: 1, rows: rows}, &mockSvcDepRepo{err: boom}},
 	}
 
 	for _, tt := range tests {

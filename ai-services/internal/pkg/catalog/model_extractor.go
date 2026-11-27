@@ -121,7 +121,7 @@ func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, com
 			continue
 		}
 
-		if err := p.addComponentModels(ctx, comp.ComponentType.ID, comp.ID, allModels); err != nil {
+		if err := p.addComponentModels(ctx, comp, allModels); err != nil {
 			return fmt.Errorf("failed to collect models for component %s/%s: %w", comp.ComponentType.ID, comp.ID, err)
 		}
 	}
@@ -129,9 +129,18 @@ func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, com
 	return nil
 }
 
-// addComponentModels adds component models to the provided map.
-// For components, models are read from values.schema.json file using GetComponentProviderParams.
-func (p *CatalogProvider) addComponentModels(ctx context.Context, componentType, componentID string, allModels map[string]bool) error {
+// addComponentModels adds the models of a component to the provided map.
+// A model provider lists every model it serves in its models.yaml, as its schema may not carry
+// them. The model fields of the component's values.schema.json are read as well.
+func (p *CatalogProvider) addComponentModels(ctx context.Context, comp types.Component, allModels map[string]bool) error {
+	componentType, componentID := comp.ComponentType.ID, comp.ID
+
+	if models.IsModelProvider(&comp, nil) {
+		if err := p.addModelProviderModels(componentType, componentID, allModels); err != nil {
+			return err
+		}
+	}
+
 	// Use existing GetComponentProviderParams to load the schema.
 	provider, err := p.WithRuntime(string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
@@ -152,6 +161,27 @@ func (p *CatalogProvider) addComponentModels(ctx context.Context, componentType,
 
 	// Extract models from schema
 	models.ExtractFromSchema(schema, allModels)
+
+	return nil
+}
+
+// addModelProviderModels adds every model of the provider's models.yaml to the provided map.
+func (p *CatalogProvider) addModelProviderModels(componentType, componentID string, allModels map[string]bool) error {
+	key := fmt.Sprintf("%s/%s", componentType, componentID)
+
+	item, ok := p.getItem(key)
+	if !ok {
+		return fmt.Errorf("component provider '%s' not found", key)
+	}
+
+	listed, err := models.List(item.itemFS, item.Path)
+	if err != nil {
+		return fmt.Errorf("failed to list models of %s: %w", key, err)
+	}
+
+	for _, m := range listed {
+		allModels[m.ID] = true
+	}
 
 	return nil
 }
@@ -222,6 +252,8 @@ type catalogModel struct {
 	model         types.Model // the first entry found, components before connectors
 	componentType string
 	providers     []types.ModelDeployProvider
+	// defaultFor holds the ids of the providers whose models.yaml marks this model as their default.
+	defaultFor map[string]bool
 }
 
 // collectModels gathers the deployable models by id from every model component and "models" connector.
@@ -251,10 +283,11 @@ func (p *CatalogProvider) collectModels(modelID string) (map[string]*catalogMode
 
 			cm, seen := result[m.ID]
 			if !seen {
-				cm = &catalogModel{model: m, componentType: componentType}
+				cm = &catalogModel{model: m, componentType: componentType, defaultFor: map[string]bool{}}
 				result[m.ID] = cm
 			}
 			cm.providers = append(cm.providers, provider)
+			cm.defaultFor[provider.ID] = m.Default
 		}
 	}
 
@@ -269,13 +302,14 @@ func fillEntry(entry *types.ModelCatalogEntry, cm *catalogModel, components []ty
 	sorted := models.FilterAndSortProviders(cm.providers, "")
 	entry.Providers = make([]types.ModelCatalogProvider, 0, len(sorted))
 	for _, pr := range sorted {
-		entry.Providers = append(entry.Providers, types.ModelCatalogProvider{ID: pr.ID, Name: pr.Name, DeploymentType: pr.DeploymentType})
+		entry.Providers = append(entry.Providers, types.ModelCatalogProvider{ID: pr.ID, Name: pr.Name, DeploymentType: pr.DeploymentType, DefaultModel: cm.defaultFor[pr.ID]})
 	}
 }
 
 // ListModelCatalog lists the deployable models with the providers that serve them, in no particular order.
-// componentType, when set, keeps only the models of that role (llm, embedding, reranker).
-func (p *CatalogProvider) ListModelCatalog(componentType string) ([]types.ModelCatalogEntry, error) {
+// deploymentType, when set, keeps only the models served by a provider of that type and narrows their
+// providers to it. componentType, when set, keeps only the models of that role (llm, embedding, reranker).
+func (p *CatalogProvider) ListModelCatalog(deploymentType constants.DeploymentType, componentType string) ([]types.ModelCatalogEntry, error) {
 	components, err := p.ListComponents()
 	if err != nil {
 		return nil, err
@@ -295,6 +329,16 @@ func (p *CatalogProvider) ListModelCatalog(componentType string) ([]types.ModelC
 
 		entry := cm.model.Entry()
 		fillEntry(&entry, cm, components)
+
+		if deploymentType != "" {
+			entry.Providers = slices.DeleteFunc(entry.Providers, func(pr types.ModelCatalogProvider) bool {
+				return pr.DeploymentType != deploymentType
+			})
+			if len(entry.Providers) == 0 {
+				continue
+			}
+		}
+
 		result = append(result, entry)
 	}
 

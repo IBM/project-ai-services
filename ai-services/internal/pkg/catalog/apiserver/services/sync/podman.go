@@ -9,6 +9,7 @@ import (
 
 	catalogpkg "github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	modelpkg "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -51,6 +52,11 @@ func (s *podmanSync) WithRuntime(rt runtime.Runtime) (RuntimeSync, error) {
 		resourceCache:   s.resourceCache,
 		cacheMutex:      s.cacheMutex,
 	}, nil
+}
+
+// WithModelsNamespace returns the receiver: Podman deploys models in the same runtime as the application.
+func (s *podmanSync) WithModelsNamespace() (RuntimeSync, error) {
+	return s, nil
 }
 
 // FetchPodStatuses fetches all pods labelled with the given templateID and returns their statuses.
@@ -290,21 +296,20 @@ func (s *podmanSync) extractResourceLabelsFromPodSpec(podSpec *modelpkg.PodSpec,
 		return
 	}
 
-	if secretLabel, ok := podSpec.Labels["ai-services.io/secret"]; ok && secretLabel != "" {
-		for name := range strings.SplitSeq(secretLabel, ",") {
-			if name = strings.TrimSpace(name); name != "" {
-				counts.SecretNames = append(counts.SecretNames, name)
-			}
+	counts.SecretNames = append(counts.SecretNames, parseResourceLabel(podSpec.Labels["ai-services.io/secret"])...)
+	counts.VolumeNames = append(counts.VolumeNames, parseResourceLabel(podSpec.Labels["ai-services.io/volume"])...)
+}
+
+// parseResourceLabel splits a comma-separated label value into valid resource names.
+func parseResourceLabel(label string) []string {
+	var names []string
+	for name := range strings.SplitSeq(label, ",") {
+		if name = strings.TrimSpace(name); name != "" && !strings.Contains(name, constants.TemplateNoValue) {
+			names = append(names, name)
 		}
 	}
 
-	if volumeLabel, ok := podSpec.Labels["ai-services.io/volume"]; ok && volumeLabel != "" {
-		for name := range strings.SplitSeq(volumeLabel, ",") {
-			if name = strings.TrimSpace(name); name != "" {
-				counts.VolumeNames = append(counts.VolumeNames, name)
-			}
-		}
-	}
+	return names
 }
 
 func (s *podmanSync) getOrCountTemplateResources(ctx context.Context, catalogID, instanceID, itemType string) *ResourceCounts {

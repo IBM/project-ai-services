@@ -39,7 +39,9 @@ func newTestPlan(t *testing.T, componentType, providerID string) *types.LocalPla
 }
 
 func TestOpenShiftDeployer_Check(t *testing.T) {
-	require.NoError(t, NewOpenShiftDeployer().Check(context.Background(), newTestPlan(t, "llm", "vllm-cpu")))
+	plan := newTestPlan(t, "llm", "vllm-cpu")
+
+	require.NoError(t, NewOpenShiftDeployer().Check(context.Background(), plan.Runtime, []*types.LocalPlan{plan}))
 }
 
 func TestOpenShiftDeployer_Start_UnknownProvider(t *testing.T) {

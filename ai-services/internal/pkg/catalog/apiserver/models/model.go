@@ -42,15 +42,22 @@ type ListModelsRequest struct {
 	PageSize       int
 	ComponentType  string
 	DeploymentType constants.DeploymentType
-	// ProviderIDs and Models are multi-value filters: a model matches any of the values.
+	// ProviderIDs, Models and Statuses are multi-value filters: a model matches any of the values.
 	ProviderIDs []string
 	Models      []string
-	Status      string
+	Statuses    []string
 	// Search is a case-insensitive substring match on the model name.
 	Search string
 	// CreatedBy restricts the list to models created by this user. It is set from the token by
 	// the handler.
 	CreatedBy string
+}
+
+// ModelProfile is the hardware profile a local model is deployed with.
+type ModelProfile struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // ModelBase holds the fields shared by the list and detail representations of a model.
@@ -63,11 +70,13 @@ type ModelBase struct {
 	// Worker is null for remote models and for local models on the control-plane Podman socket.
 	Worker *types.ApplicationWorker `json:"worker"`
 	Model  string                   `json:"model"`
+	// Profile is the hardware profile of a local model; null for remote models.
+	Profile *ModelProfile `json:"profile"`
 	// Params are the non-sensitive provider params the model was created with.
 	Params  map[string]any `json:"params,omitempty"`
 	Status  string         `json:"status"`
 	Message string         `json:"message"`
-	// ConnectedServices is the number of services using the model.
+	// ConnectedServices is the number of distinct applications using the model.
 	ConnectedServices int       `json:"connected_services"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`

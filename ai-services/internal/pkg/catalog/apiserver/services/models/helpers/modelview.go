@@ -54,6 +54,43 @@ func (m ModelCatalog) ComponentTypeInfos() map[string]types.ComponentType {
 	return infos
 }
 
+// ProfileInfos maps "<component type>/<provider id>/<profile id>" to the profile, taken from the
+// catalog once per request instead of once per row. Providers without profiles add nothing.
+func (m ModelCatalog) ProfileInfos() map[string]apimodels.ModelProfile {
+	infos := make(map[string]apimodels.ModelProfile)
+
+	for _, c := range m.Components() {
+		byID, err := m.provider.ProviderProfiles(c.ComponentType.ID, c.ID)
+		if err != nil {
+			continue
+		}
+
+		for id, p := range byID {
+			infos[profileKey(c.ComponentType.ID, c.ID, id)] = apimodels.ModelProfile{ID: id, Name: p.Name, Description: p.Description}
+		}
+	}
+
+	return infos
+}
+
+func profileKey(componentType, providerID, profileID string) string {
+	return componentType + "/" + providerID + "/" + profileID
+}
+
+// profileInfo is the profile a local model is deployed with, or nil when it has none. The id
+// alone is returned when the catalog no longer lists the profile (e.g. a removed bundle).
+func profileInfo(row dbrepo.ModelRow, profiles map[string]apimodels.ModelProfile) *apimodels.ModelProfile {
+	if row.Profile == "" {
+		return nil
+	}
+
+	if p, ok := profiles[profileKey(row.ComponentType, row.Provider, row.Profile)]; ok {
+		return &p
+	}
+
+	return &apimodels.ModelProfile{ID: row.Profile}
+}
+
 // componentTypeInfo is the component type of a model with its display names, which are left empty
 // when the catalog no longer lists the type.
 func componentTypeInfo(row dbrepo.ModelRow, componentTypes map[string]types.ComponentType) types.ComponentType {
@@ -99,9 +136,9 @@ func ModelDependencyType(row dbrepo.ModelRow) dbmodels.DependencyType {
 }
 
 // ToModelBase maps a database row to the fields shared by the list and detail responses.
-// providers comes from ProviderNames and componentTypes from ComponentTypeInfos; services is the
-// number of services using the model.
-func ToModelBase(row dbrepo.ModelRow, providers map[string]string, componentTypes map[string]types.ComponentType, services int) apimodels.ModelBase {
+// providers comes from ProviderNames, componentTypes from ComponentTypeInfos and profiles from
+// ProfileInfos; services is the number of services using the model.
+func ToModelBase(row dbrepo.ModelRow, providers map[string]string, componentTypes map[string]types.ComponentType, profiles map[string]apimodels.ModelProfile, services int) apimodels.ModelBase {
 	return apimodels.ModelBase{
 		ID:                row.ID.String(),
 		DeploymentType:    row.DeploymentType,
@@ -110,6 +147,7 @@ func ToModelBase(row dbrepo.ModelRow, providers map[string]string, componentType
 		Provider:          providerInfo(row, providers),
 		Worker:            workerInfo(row),
 		Model:             row.Model,
+		Profile:           profileInfo(row, profiles),
 		Params:            row.Params,
 		Status:            row.Status,
 		Message:           row.Message,

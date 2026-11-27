@@ -45,7 +45,7 @@ func (l *Lister) List(ctx context.Context, req apimodels.ListModelsRequest) (*ap
 		ComponentType:  req.ComponentType,
 		Providers:      req.ProviderIDs,
 		Models:         req.Models,
-		Status:         req.Status,
+		Statuses:       req.Statuses,
 		Search:         req.Search,
 		Limit:          req.PageSize,
 		Offset:         (req.Page - 1) * req.PageSize,
@@ -70,10 +70,11 @@ func (l *Lister) List(ctx context.Context, req apimodels.ListModelsRequest) (*ap
 
 	providers := l.modelCatalog.ProviderNames()
 	typeInfos := l.modelCatalog.ComponentTypeInfos()
+	profiles := l.modelCatalog.ProfileInfos()
 	items := make([]apimodels.ModelListItem, 0, len(rows))
 
 	for _, row := range rows {
-		items = append(items, toListItem(row, providers, typeInfos, counts[row.ID]))
+		items = append(items, toListItem(row, providers, typeInfos, profiles, counts[row.ID]))
 	}
 
 	return &apimodels.ModelListResponse{
@@ -82,8 +83,8 @@ func (l *Lister) List(ctx context.Context, req apimodels.ListModelsRequest) (*ap
 	}, nil
 }
 
-// connectedServices counts the services using each model of the page, in one query per
-// dependency type present on the page: local models are linked as components, remote ones as
+// connectedServices counts the distinct applications using each model of the page, in one query
+// per dependency type present on the page: local models are linked as components, remote ones as
 // connectors. A type with no model on the page is not queried.
 func (l *Lister) connectedServices(ctx context.Context, rows []dbrepo.ModelRow) (map[uuid.UUID]int, error) {
 	groups := []struct {
@@ -111,9 +112,9 @@ func (l *Lister) connectedServices(ctx context.Context, rows []dbrepo.ModelRow) 
 			continue
 		}
 
-		got, err := l.svcDepRepo.GetServiceCountByDependency(ctx, g.ids, g.depType)
+		got, err := l.svcDepRepo.GetApplicationCountByDependency(ctx, g.ids, g.depType)
 		if err != nil {
-			return nil, fmt.Errorf("failed to count services using models: %w", err)
+			return nil, fmt.Errorf("failed to count applications using models: %w", err)
 		}
 
 		maps.Copy(counts, got)
@@ -123,6 +124,6 @@ func (l *Lister) connectedServices(ctx context.Context, rows []dbrepo.ModelRow) 
 }
 
 // toListItem maps a database row to its API shape.
-func toListItem(row dbrepo.ModelRow, providers map[string]string, componentTypes map[string]types.ComponentType, services int) apimodels.ModelListItem {
-	return apimodels.ModelListItem{ModelBase: helpers.ToModelBase(row, providers, componentTypes, services)}
+func toListItem(row dbrepo.ModelRow, providers map[string]string, componentTypes map[string]types.ComponentType, profiles map[string]apimodels.ModelProfile, services int) apimodels.ModelListItem {
+	return apimodels.ModelListItem{ModelBase: helpers.ToModelBase(row, providers, componentTypes, profiles, services)}
 }

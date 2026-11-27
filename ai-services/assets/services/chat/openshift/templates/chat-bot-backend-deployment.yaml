@@ -40,13 +40,29 @@ spec:
             - "httptools"
           env:
             - name: EMB_ENDPOINT
-              value: http://embedding-predictor:8000
+              value: "http://{{ .Values.embedding.host }}:{{ .Values.embedding.port }}{{ .Values.embedding.path }}"
+            - name: EMB_TOKENIZE_ENDPOINT
+              value: "{{ .Values.embedding.tokenize_endpoint }}"
+            - name: EMB_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "embedding-secret-key"
+                  key: key
             - name: EMB_MODEL
               value: {{ .Values.embedding.model | quote }}
             - name: EMB_MAX_MODEL_LEN
               value: {{ .Values.embedding.maxModelLen | quote }}
             - name: LLM_ENDPOINT
-              value: http://llm-predictor:8000
+              value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}{{ .Values.llm.path }}"
+            - name: LLM_TOKENIZE_ENDPOINT
+              value: "{{ .Values.llm.tokenize_endpoint }}"
+            - name: LLM_INSTANCE_ID
+              value: "{{ .Values.llm.instance_id }}"
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "llm-secret-key"
+                  key: key
             - name: LLM_MODEL
               value: {{ .Values.llm.model | quote }}
             - name: LLM_MAX_MODEL_LEN
@@ -85,13 +101,6 @@ spec:
               value: "{{ .Values.backend.systemPrompt }}"
             - name: CHATBOT_SIMILARITY_SERVICE_URL
               value: "http://similarity-api:7000"
-          {{- if .Values.llm.apiKey }}
-            - name: LLM_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: "vllm-instruct-api-key"
-                  key: apiKey
-          {{- end }}
           ports:
             - containerPort: 5000
               protocol: TCP

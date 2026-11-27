@@ -46,7 +46,7 @@ To eliminate maintenance overhead, ensure zero-friction onboarding of new models
 3. **`recommendations` is purely additive guidance — not a definition of supported models:**
    - If a service declares no `recommendations`, all models and profiles from the provider are offered to the user unchanged.
    - If `recommendations` are declared, **all models and profiles are still selectable**; the recommendations only guide pre-selection.
-   - The **first entry** acts as the primary recommendation — the UI pre-selects its `modelId` and renders a **"★ Recommended"** badge on it.
+   - The **first entry** acts as the primary recommendation — the UI pre-selects its `model` (the model ID) and renders a **"★ Recommended"** badge on it.
    - **All entries** (including the first) carry a `profile` so the UI can pre-select the right profile whenever that model is picked.
 4. **User Flexibility:** Recommendations pre-select the model and profile, but users are free to select any model or profile at deploy time.
 5. **Zero-configuration for open services:** If a service has no custom recommendations, its `models` section is omitted entirely — all models and profiles from the provider are served as-is.
@@ -82,17 +82,17 @@ models:
   - componentType: <llm | embedding | reranker>
     providers:
       # Local Provider Example
-      - providerId: <vllm-spyre | vllm-cpu>
+      - id: <vllm-spyre | vllm-cpu>
         recommendations:
-          - modelId: <primary-model-id>        # first entry = primary (pre-selected in UI)
+          - model: <primary-model-id>        # first entry = primary (pre-selected in UI)
             profile: <profile-id>
-          - modelId: <other-model-id>          # per-model profile override
+          - model: <other-model-id>          # per-model profile override
             profile: <profile-id>
 
       # Remote Provider Example (WatsonX, hosted_vllm — no hardware profiles)
-      - providerId: <watsonx | hosted_vllm>
+      - id: <watsonx | hosted_vllm>
         recommendations:
-          - modelId: <primary-model-id>        # no profile for remote; first entry = primary
+          - model: <primary-model-id>        # no profile for remote; first entry = primary
 ```
 
 #### Complete Key Reference
@@ -102,9 +102,9 @@ models:
 | `models` | Root | `list` | Optional | Top-level section declaring recommendations. If omitted, all models and profiles from the provider are offered with no pre-selection hints. `recommendations` are purely additive — they do not restrict the model set. |
 | `componentType` | `models[]` | `string` | **Yes** (if `models` present) | The component dependency type (`llm`, `embedding`, `reranker`). Must match one of `dependencies`. |
 | `providers` | `models[]` | `list` | **Yes** | List of provider-specific contract entries. |
-| `providerId` | `providers[]` | `string` | **Yes** | Registered provider identifier (local: `vllm-spyre`, `vllm-cpu`; remote: `watsonx`, `hosted_vllm`). |
+| `id` | `providers[]` | `string` | **Yes** | Registered provider ID (local: `vllm-spyre`, `vllm-cpu`; remote: `watsonx`, `hosted_vllm`). |
 | `recommendations` | `providers[]` | `list<object>` | Optional | Ordered list of model+profile recommendations. The **first entry** is the primary (pre-selected, "★ Recommended"). Every entry's `profile` is pre-selected when that model is picked. Returned as-is in the service / architecture `deploy-options` response. |
-| `modelId` | `recommendations[]` | `string` | **Yes** | The model ID to recommend. |
+| `model` | `recommendations[]` | `string` | **Yes** | The ID of the model to recommend, as listed in the provider's `models.yaml`. |
 | `profile` | `recommendations[]` | `string` | Optional | The recommended profile ID (local providers only; omitted for remote). |
 
 ---
@@ -120,15 +120,15 @@ Chat is a conversational RAG workload. On Spyre it recommends `granite-4.1-8b-fp
 models:
   - componentType: llm
     providers:
-      - providerId: vllm-spyre
+      - id: vllm-spyre
         recommendations:
-          - modelId: ibm-granite/granite-4.1-8b-fp8    # primary — pre-selected in UI
+          - model: ibm-granite/granite-4.1-8b-fp8    # primary — pre-selected in UI
             profile: standard
-          - modelId: ibm-granite/granite-3.3-8b-instruct
+          - model: ibm-granite/granite-3.3-8b-instruct
             profile: balanced
-      - providerId: watsonx
+      - id: watsonx
         recommendations:
-          - modelId: ibm/granite-3-8b-instruct
+          - model: ibm/granite-3-8b-instruct
 ```
 
 #### `services/summarize/metadata.yaml`
@@ -140,9 +140,9 @@ Summarize operates over long documents. It supports all models and profiles, rec
 models:
   - componentType: llm
     providers:
-      - providerId: vllm-spyre
+      - id: vllm-spyre
         recommendations:
-          - modelId: ibm-granite/granite-4.1-8b-fp8
+          - model: ibm-granite/granite-4.1-8b-fp8
             profile: standard
 ```
 
@@ -155,11 +155,11 @@ Extract is a short-context, structured extraction workload validated for single-
 models:
   - componentType: llm
     providers:
-      - providerId: vllm-spyre
+      - id: vllm-spyre
         recommendations:
-          - modelId: ibm-granite/granite-4.1-8b-fp8    # primary — pre-selected in UI
+          - model: ibm-granite/granite-4.1-8b-fp8    # primary — pre-selected in UI
             profile: compact-4k
-          - modelId: ibm-granite/granite-3.3-8b-instruct
+          - model: ibm-granite/granite-3.3-8b-instruct
             profile: compact-4k
 ```
 
@@ -172,9 +172,9 @@ Translate processes token chunks in short context on 1 card. It recommends `comp
 models:
   - componentType: llm
     providers:
-      - providerId: vllm-spyre
+      - id: vllm-spyre
         recommendations:
-          - modelId: ibm-granite/granite-4.1-8b-fp8
+          - model: ibm-granite/granite-4.1-8b-fp8
             profile: compact-4k
 ```
 
@@ -187,15 +187,15 @@ Similarity depends on `embedding` and `reranker`. It provides recommendations fo
 models:
   - componentType: embedding
     providers:
-      - providerId: vllm-cpu
+      - id: vllm-cpu
         recommendations:
-          - modelId: ibm-granite/granite-embedding-278m-multilingual
+          - model: ibm-granite/granite-embedding-278m-multilingual
             profile: standard
   - componentType: reranker
     providers:
-      - providerId: vllm-spyre
+      - id: vllm-spyre
         recommendations:
-          - modelId: BAAI/bge-reranker-v2-m3
+          - model: BAAI/bge-reranker-v2-m3
             profile: standard
 ```
 
@@ -207,11 +207,11 @@ models:
 
 `values.schema.json` no longer contains `model` or `profile`; models come from each provider's `models.yaml` and profiles from `profiles.yaml`, exposed through the generic catalog endpoints (`GET /api/v1/catalog/models`, `GET /api/v1/catalog/models/:id/deploy-options`). These are **service-agnostic**: they take no `service` parameter and are never filtered or annotated.
 
-The service contract reaches the UI through the deploy-options response of the service (`GET /api/v1/services/:id/deploy-options`) and of architectures that include it (`GET /api/v1/architectures/:id/deploy-options`). For each model component, the backend copies the provider's `recommendations` list from the matching `services/<id>/metadata.yaml` `models[]` entry onto the provider in the `catalog` object, as `{ model_id, profile }` entries (`profile` omitted for remote providers), in declared order. The key is omitted when the service declares none.
+The service contract reaches the UI through the deploy-options response of the service (`GET /api/v1/services/:id/deploy-options`) and of architectures that include it (`GET /api/v1/architectures/:id/deploy-options`). For each model component, the backend copies the provider's `recommendations` list from the matching `services/<id>/metadata.yaml` `models[]` entry onto the provider, as `{ model, profile }` entries, in declared order. The key is omitted when the service declares none. Only local providers are listed in deploy-options; remote connector providers (`watsonx`, `hosted_vllm`) are not offered, so their recommendations are never surfaced.
 
 The UI then:
 
-1. Calls `models.url` for the full model list and pre-selects the **first** `recommendations` entry's `model_id`, rendering the **"★ Recommended"** badge on it.
+1. Calls `models.url` for the full model list and pre-selects the **first** `recommendations` entry's `model`, rendering the **"★ Recommended"** badge on it.
 2. When the user picks a model, calls `deploy_options.url` for its profiles and pre-selects the `profile` from that model's `recommendations` entry (falling back to the profile marked `default`).
 3. If a model has exactly one profile, hides the profile dropdown — the profile is auto-injected at deploy time.
 
@@ -222,15 +222,15 @@ When the user submits an application or service deployment, any valid model and 
 **Auto-Resolution / Default Injection:** If the user did not provide a `profile` (because only 1 profile exists for the model, or the user submitted default parameters):
 - If only 1 profile exists for that model $\rightarrow$ inject that single profile.
 - If `recommendations` contains an entry for this model $\rightarrow$ inject that entry's `profile`.
-- Otherwise $\rightarrow$ inject the provider's default profile from `profiles.yaml`.
+- Otherwise $\rightarrow$ inject the model's `default_profile` from `models.yaml`, else the provider's default profile from `profiles.yaml`.
 
 ### Step C — Bundle upload validation (BYOS only)
 
 For user-defined service bundles uploaded via `POST /api/v1/catalog/bundles`, the validator checks:
 
 1. `componentType` matches one of the bundle's declared `dependencies`.
-2. `providerId` matches a known provider.
-3. Every `recommendations[*].modelId` exists in the provider's `models.yaml`.
+2. Every `providers[*].id` matches a known provider.
+3. Every `recommendations[*].model` exists in the provider's `models.yaml`.
 4. Every `recommendations[*].profile` exists in `profiles.yaml` and is allowed for that model.
 
 ### Deploy-options response shape
@@ -240,15 +240,15 @@ For a model provider inside a service component entry (`GET /api/v1/services/:id
 ```json
 {
   "type": "llm",
+  "category": "models",
   "providers": [
     {
       "id": "vllm-spyre",
-      "category": "model",
       "models":         { "url": "/api/v1/catalog/models?component_type=llm" },
       "deploy_options": { "url": "/api/v1/catalog/models/{model_id}/deploy-options?provider_id=vllm-spyre" },
       "recommendations": [
-        { "model_id": "<primary-model-id>", "profile": "<profile-id>" },
-        { "model_id": "<other-model-id>",   "profile": "<profile-id>" }
+        { "model": "<primary-model-id>", "profile": "<profile-id>" },
+        { "model": "<other-model-id>",   "profile": "<profile-id>" }
       ]
     }
   ]
@@ -256,7 +256,7 @@ For a model provider inside a service component entry (`GET /api/v1/services/:id
 ```
 
 **Field reference:**
-- `recommendations[0].model_id` — the primary recommended model; UI renders the **"★ Recommended"** badge and pre-selects it.
+- `recommendations[0].model` — the primary recommended model; UI renders the **"★ Recommended"** badge and pre-selects it.
 - `recommendations[*].profile` — profile the UI pre-selects when the user picks that model (including on initial load).
 - `recommendations` is optional per provider; when absent the provider's full model and profile lists are offered with no pre-selection hint.
 
@@ -276,12 +276,12 @@ type ServiceModelContract struct {
 }
 
 type ServiceProviderContract struct {
-    ProviderID      string                `yaml:"providerId" json:"providerId"`
+    ProviderID      string                `yaml:"id" json:"id"`
     Recommendations []ModelRecommendation `yaml:"recommendations,omitempty" json:"recommendations,omitempty"`
 }
 
 type ModelRecommendation struct {
-    ModelID string `yaml:"modelId" json:"modelId"`
+    ModelID string `yaml:"model" json:"model"`
     Profile string `yaml:"profile,omitempty" json:"profile,omitempty"`
 }
 ```
@@ -316,7 +316,7 @@ type ModelRecommendation struct {
 #### 1. Service deploy-options: `GET /api/v1/services/{id}/deploy-options`
 #### 2. Architecture deploy-options: `GET /api/v1/architectures/{id}/deploy-options`
 - For each `llm` / `embedding` / `reranker` component, adds `recommendations` (as declared in `services/<id>/metadata.yaml`) to each model provider's `catalog` object. Omitted when not declared.
-- Remote providers (`watsonx`, `hosted_vllm`) have no profiles, so their `recommendations` entries carry only `model_id`.
+- Remote providers (`watsonx`, `hosted_vllm`) are not listed in these responses; only local providers are.
 
 #### 3. Unchanged
 - `GET /api/v1/catalog/models` and `GET /api/v1/catalog/models/:id/deploy-options` take no `service` parameter and return unfiltered, unannotated data.
@@ -339,7 +339,7 @@ type ModelRecommendation struct {
 ### Scenario B — Recommendation Only (Extract service)
 
 1. `granite-4.1-8b-fp8` in `vllm-spyre` allows profiles `[standard, balanced, compact-4k]`.
-2. `services/extract/metadata.yaml` specifies `recommendations: [{ modelId: granite-4.1-8b-fp8, profile: compact-4k }]`.
+2. `services/extract/metadata.yaml` specifies `recommendations: [{ model: granite-4.1-8b-fp8, profile: compact-4k }]`.
 3. User opens Extract deploy form → `GET /api/v1/services/extract/deploy-options` returns that `recommendations` on the `vllm-spyre` provider.
 4. UI pre-selects `granite-4.1-8b-fp8` with the **"★ Recommended"** badge, fetches its profiles from `deploy_options.url`, and pre-selects `compact-4k` in the profile dropdown. The user may still pick `standard` or `balanced`.
 5. User submits with the default selection → pod launches with 1 Spyre card.
@@ -354,8 +354,8 @@ A service could declare `exclusions` per provider in `services/<name>/metadata.y
 
 ```yaml
 exclusions:
-  - modelId: <model-id-to-exclude>     # no profiles key = exclude the model entirely
-  - modelId: <model-id>
+  - model: <model-id-to-exclude>     # no profiles key = exclude the model entirely
+  - model: <model-id>
     profiles: [<profile-id-to-exclude>] # only these profiles are excluded for this model
 ```
 
@@ -371,7 +371,7 @@ CREATE TABLE service_model_contracts (
     service_id           VARCHAR(100) NOT NULL,          -- e.g. 'chat', 'extract'
     component_type       VARCHAR(50)  NOT NULL,          -- 'llm', 'embedding', 'reranker'
     provider_id          VARCHAR(50)  NOT NULL,          -- 'vllm-spyre', 'vllm-cpu', 'watsonx'
-    recommendations      JSONB,                          -- JSON array: [{"modelId": "...", "profile": "standard"}]; first entry = primary
+    recommendations      JSONB,                          -- JSON array: [{"model": "...", "profile": "standard"}]; first entry = primary
     is_builtin           BOOLEAN      NOT NULL DEFAULT false, -- true for seed rows from YAML
     created_by           VARCHAR(100) NOT NULL DEFAULT 'system',
     created_at           TIMESTAMPTZ  NOT NULL DEFAULT now(),

@@ -242,6 +242,42 @@ func TestComponentTypeInfo(t *testing.T) {
 	assert.Equal(t, types.ComponentType{ID: "llm"}, componentTypeInfo(dbrepo.ModelRow{ComponentType: "llm"}, nil))
 }
 
+func TestModelCatalog_ProfileInfos(t *testing.T) {
+	infos := newTestModelCatalog(t).ProfileInfos()
+
+	got, ok := infos["llm/vllm-spyre/compact-4k"]
+	require.True(t, ok, "compact-4k is missing from %v", infos)
+	assert.Equal(t, "compact-4k", got.ID)
+	assert.NotEmpty(t, got.Name)
+	assert.NotEmpty(t, got.Description)
+
+	assert.Contains(t, infos, "llm/vllm-spyre/standard")
+	assert.NotContains(t, infos, "llm/vllm-cpu/compact-4k", "profiles are scoped by provider")
+
+	t.Run("empty catalog has no profiles", func(t *testing.T) {
+		got := New(&catalog.CatalogProvider{}).ProfileInfos()
+
+		require.NotNil(t, got)
+		assert.Empty(t, got)
+	})
+}
+
+func TestProfileInfo(t *testing.T) {
+	profiles := map[string]apimodels.ModelProfile{
+		"llm/vllm-spyre/standard": {ID: "standard", Name: "Standard", Description: "4 cards"},
+	}
+	row := dbrepo.ModelRow{ComponentType: "llm", Provider: "vllm-spyre", Profile: "standard"}
+
+	assert.Equal(t, &apimodels.ModelProfile{ID: "standard", Name: "Standard", Description: "4 cards"}, profileInfo(row, profiles))
+
+	row.Profile = "retired"
+	assert.Equal(t, &apimodels.ModelProfile{ID: "retired"}, profileInfo(row, profiles),
+		"a profile removed from the catalog falls back to its id")
+
+	row.Profile = ""
+	assert.Nil(t, profileInfo(row, profiles), "a model without a stored profile has none")
+}
+
 func TestToModelBase(t *testing.T) {
 	id := uuid.New()
 	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
@@ -249,6 +285,9 @@ func TestToModelBase(t *testing.T) {
 	providers := map[string]string{"remote/watsonx": "IBM watsonx.ai on IBM Cloud", "local/vllm-spyre": "vLLM Spyre"}
 	componentTypes := map[string]types.ComponentType{
 		"llm": {ID: "llm", Name: "Large Language Model (LLM)", ShortName: "LLM"},
+	}
+	profiles := map[string]apimodels.ModelProfile{
+		"llm/vllm-spyre/standard": {ID: "standard", Name: "Standard", Description: "4 cards"},
 	}
 
 	local := dbrepo.ModelRow{
@@ -258,6 +297,7 @@ func TestToModelBase(t *testing.T) {
 		ComponentType:     "llm",
 		Provider:          "vllm-spyre",
 		Model:             "ibm-granite/granite-3.3-8b-instruct",
+		Profile:           "standard",
 		Params:            map[string]any{"max_tokens": 1024},
 		Status:            "running",
 		Message:           "ok",
@@ -298,6 +338,7 @@ func TestToModelBase(t *testing.T) {
 				assert.Equal(t, types.ProviderInfo{ID: "vllm-spyre", Name: "vLLM Spyre"}, got.Provider)
 				assert.Equal(t, &types.ApplicationWorker{ID: "w-1", Name: "worker-1", RuntimeType: "podman"}, got.Worker)
 				assert.Equal(t, "ibm-granite/granite-3.3-8b-instruct", got.Model)
+				assert.Equal(t, &apimodels.ModelProfile{ID: "standard", Name: "Standard", Description: "4 cards"}, got.Profile)
 				assert.Equal(t, map[string]any{"max_tokens": 1024}, got.Params)
 				assert.Equal(t, "running", got.Status)
 				assert.Equal(t, "ok", got.Message)
@@ -311,6 +352,7 @@ func TestToModelBase(t *testing.T) {
 			row:  remote,
 			check: func(t *testing.T, got apimodels.ModelBase) {
 				assert.Nil(t, got.Worker)
+				assert.Nil(t, got.Profile)
 				assert.Equal(t, types.ProviderInfo{ID: "watsonx", Name: "IBM watsonx.ai on IBM Cloud"}, got.Provider)
 				assert.Zero(t, got.ConnectedServices)
 				assert.Nil(t, got.Params)
@@ -327,7 +369,7 @@ func TestToModelBase(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.check(t, ToModelBase(tt.row, providers, componentTypes, tt.services))
+			tt.check(t, ToModelBase(tt.row, providers, componentTypes, profiles, tt.services))
 		})
 	}
 }

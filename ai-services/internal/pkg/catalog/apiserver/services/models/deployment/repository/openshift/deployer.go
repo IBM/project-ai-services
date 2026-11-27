@@ -9,6 +9,7 @@ import (
 	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
 
 // OpenShiftDeployer deploys a local model on an OpenShift runtime, local or remote over the worker
@@ -24,17 +25,15 @@ func NewOpenShiftDeployer() *OpenShiftDeployer {
 
 // Check accepts every plan: the cluster scheduler, not the control plane, places the predictor on
 // a node with the accelerators the chart requests.
-func (d *OpenShiftDeployer) Check(context.Context, *types.LocalPlan) error {
+func (d *OpenShiftDeployer) Check(context.Context, runtime.Runtime, []*types.LocalPlan) error {
 	return nil
 }
 
-// Prepare installs the prerequisite charts (the KServe ServingRuntimes) into the models
-// namespace. There is nothing to pull or download here: KServe pulls the image and fetches the
+// Prepare does nothing. The prerequisite charts (the KServe ServingRuntimes) are installed into
+// the models namespace when the worker is configured, and KServe pulls the image and fetches the
 // weights from the chart's storageUri when the predictor starts.
-func (d *OpenShiftDeployer) Prepare(ctx context.Context, plan *types.LocalPlan) error {
-	helm := openshiftutils.NewHelmManager(plan.Runtime, catalogutils.ModelsNamespace())
-
-	return openshiftutils.DeployPrerequisites(ctx, helm)
+func (d *OpenShiftDeployer) Prepare(context.Context, *types.LocalPlan) error {
+	return nil
 }
 
 // Start installs the provider's chart, waits for the InferenceService to be Ready and returns the

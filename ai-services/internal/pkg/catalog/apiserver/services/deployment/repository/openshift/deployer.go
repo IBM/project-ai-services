@@ -9,6 +9,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/modelphase"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -36,6 +37,8 @@ type OpenShiftDeployer struct {
 	appRepo         repository.ApplicationRepository
 	serviceRepo     repository.ServiceRepository
 	componentRepo   repository.ComponentRepository
+	// models runs the download and deploy phases of the model components of a plan.
+	models *modelphase.Runner
 }
 
 // NewOpenShiftDeployer creates a deployer for the OpenShift runtime.
@@ -47,6 +50,7 @@ func NewOpenShiftDeployer(
 	appRepo repository.ApplicationRepository,
 	serviceRepo repository.ServiceRepository,
 	componentRepo repository.ComponentRepository,
+	models *modelphase.Runner,
 ) *OpenShiftDeployer {
 	return &OpenShiftDeployer{
 		runtime:         rt,
@@ -54,12 +58,14 @@ func NewOpenShiftDeployer(
 		appRepo:         appRepo,
 		serviceRepo:     serviceRepo,
 		componentRepo:   componentRepo,
+		models:          models,
 	}
 }
 
 // ExecuteDeployment executes the deployment plan in three ordered phases:
 //  0. Prerequisites: pre-requisite charts (ServingRuntimes etc.) installed once per namespace
-//  1. Components: main component Helm charts (concurrent, each waits for Ready)
+//  1. Components: the component Helm charts and the model components, which the model service
+//     deploys (concurrent, each waits for Ready)
 //  2. Services: service Helm charts (concurrent, each waits for Ready)
 func (d *OpenShiftDeployer) ExecuteDeployment(
 	ctx context.Context,
@@ -80,12 +86,16 @@ func (d *OpenShiftDeployer) ExecuteDeployment(
 
 	// Phase 0: Deploy prerequisites (ServingRuntimes etc.), idempotent, once per namespace
 	if err := openshiftutils.DeployPrerequisites(ctx, d.helm); err != nil {
+		// The models were recorded as Downloading and will now never be started.
+		d.models.Fail(ctx, plan, err)
 		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Prerequisites deployment failed", err)
 
 		return err
 	}
 
-	// Phase 1: Deploy components concurrently via Helm
+	// Phase 1: Deploy the components concurrently via Helm, the model components through the model
+	// service. There is no model download phase on OpenShift: the cluster pulls the images and the
+	// model weights itself when it starts them.
 	if err := d.deployComponentsConcurrently(ctx, plan); err != nil {
 		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Component deployment failed", err)
 
@@ -110,26 +120,21 @@ func (d *OpenShiftDeployer) ExecuteDeployment(
 }
 
 // deployComponentsConcurrently installs all component Helm charts in parallel and waits for all
-// to become Ready before returning.
+// to become Ready before returning. The model components are deployed by the model service.
 func (d *OpenShiftDeployer) deployComponentsConcurrently(ctx context.Context, plan *DeploymentPlan) error {
-	// Build hash → dbID index so RunConcurrently can track status per component.
-	items := make(map[string]uuid.UUID, len(plan.Components))
-	for hash, comp := range plan.Components {
-		items[hash] = comp.DatabaseID
-	}
-
 	return catalogutils.RunConcurrently(
 		ctx,
-		items,
+		plan.ComponentIDs(),
 		func(ctx context.Context, hash string) error {
-			return d.deployComponent(ctx, plan, plan.Components[hash])
+			comp := plan.Components[hash]
+			if comp.IsModel() {
+				return d.models.DeployModel(ctx, plan, comp)
+			}
+
+			return d.deployComponent(ctx, plan, comp)
 		},
-		func(ctx context.Context, dbID uuid.UUID, msg string) error {
-			return catalogutils.UpdateComponentStatus(ctx, d.componentRepo, dbID, models.ComponentStatusError, msg)
-		},
-		func(ctx context.Context, dbID uuid.UUID, msg string) error {
-			return catalogutils.UpdateComponentStatus(ctx, d.componentRepo, dbID, models.ComponentStatusRunning, msg)
-		},
+		plan.ComponentStatusFunc(d.componentRepo, models.ComponentStatusError),
+		plan.ComponentStatusFunc(d.componentRepo, models.ComponentStatusRunning),
 	)
 }
 

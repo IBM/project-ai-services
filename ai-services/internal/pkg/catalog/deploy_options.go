@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -45,7 +47,7 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(ctx context.Context, arch
 func (p *CatalogProvider) buildGlobalComponents(ctx context.Context, compRefs []types.ComponentReference) ([]types.DeployOptionsComponent, error) {
 	globalComponents := make([]types.DeployOptionsComponent, 0, len(compRefs))
 	for _, compRef := range compRefs {
-		component, err := p.buildDeployOptionsComponent(ctx, compRef.Type, false)
+		component, err := p.buildDeployOptionsComponent(ctx, compRef.Type, false, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build global component '%s': %w", compRef.Type, err)
 		}
@@ -84,7 +86,7 @@ func (p *CatalogProvider) buildSingleService(ctx context.Context, serviceID stri
 	serviceVersion := p.getServiceVersion(service.ID)
 
 	// Build all components for this service from its dependencies
-	components, err := p.buildServiceComponents(ctx, service.ID, service.Dependencies)
+	components, err := p.buildServiceComponents(ctx, service)
 	if err != nil {
 		return nil, err
 	}
@@ -121,12 +123,12 @@ func (p *CatalogProvider) buildSingleService(ctx context.Context, serviceID stri
 }
 
 // buildServiceComponents builds deploy options components for a service's dependencies.
-func (p *CatalogProvider) buildServiceComponents(ctx context.Context, serviceID string, dependencies []types.DependencyReference) ([]types.DeployOptionsComponent, error) {
-	components := make([]types.DeployOptionsComponent, 0, len(dependencies))
-	for _, dep := range dependencies {
-		component, err := p.buildDeployOptionsComponent(ctx, dep.ID, true)
+func (p *CatalogProvider) buildServiceComponents(ctx context.Context, service *types.Service) ([]types.DeployOptionsComponent, error) {
+	components := make([]types.DeployOptionsComponent, 0, len(service.Dependencies))
+	for _, dep := range service.Dependencies {
+		component, err := p.buildDeployOptionsComponent(ctx, dep.ID, true, service)
 		if err != nil {
-			return nil, fmt.Errorf("failed to build component '%s' for service '%s': %w", dep.ID, serviceID, err)
+			return nil, fmt.Errorf("failed to build component '%s' for service '%s': %w", dep.ID, service.ID, err)
 		}
 		components = append(components, *component)
 	}
@@ -186,7 +188,7 @@ func (p *CatalogProvider) GetServiceDeployOptions(ctx context.Context, serviceID
 	// Build components list
 	components := make([]types.DeployOptionsComponent, 0, len(service.Dependencies))
 	for _, dep := range service.Dependencies {
-		component, err := p.buildDeployOptionsComponent(ctx, dep.ID, true)
+		component, err := p.buildDeployOptionsComponent(ctx, dep.ID, true, service)
 		if err != nil {
 			logger.ErrorfCtx(ctx, "failed to build component '%s': %v", dep.ID, err)
 
@@ -229,7 +231,9 @@ func (p *CatalogProvider) GetServiceDeployOptions(ctx context.Context, serviceID
 
 // buildDeployOptionsComponent builds a DeployOptionsComponent for a given component type.
 // includeResources controls whether to include resource information in providers.
-func (p *CatalogProvider) buildDeployOptionsComponent(ctx context.Context, componentType string, includeResources bool) (*types.DeployOptionsComponent, error) {
+// service is the service the component belongs to, or nil for a global component; it supplies the
+// model recommendations of model providers.
+func (p *CatalogProvider) buildDeployOptionsComponent(ctx context.Context, componentType string, includeResources bool, service *types.Service) (*types.DeployOptionsComponent, error) {
 	// List all components of this type
 	allComponents, err := p.ListComponents()
 	if err != nil {
@@ -238,7 +242,7 @@ func (p *CatalogProvider) buildDeployOptionsComponent(ctx context.Context, compo
 
 	// Filter components by type and build providers
 	providers := make([]types.DeployOptionsProvider, 0, len(allComponents))
-	var componentName string
+	var componentName, category string
 
 	for _, comp := range allComponents {
 		if comp.ComponentType.ID != componentType {
@@ -250,8 +254,16 @@ func (p *CatalogProvider) buildDeployOptionsComponent(ctx context.Context, compo
 			componentName = comp.ComponentType.Name
 		}
 
+		// Get the category from the first matching component that declares one
+		if category == "" {
+			category = comp.Category
+		}
+
 		// Build provider with version, resources and schema
 		provider := p.buildProvider(ctx, comp, componentType, includeResources)
+		if comp.Category == constants.ComponentCategoryModels {
+			applyModelOptions(&provider, comp.ComponentType, service)
+		}
 		providers = append(providers, provider)
 	}
 
@@ -263,8 +275,27 @@ func (p *CatalogProvider) buildDeployOptionsComponent(ctx context.Context, compo
 	return &types.DeployOptionsComponent{
 		Type:      componentType,
 		Name:      componentName,
+		Category:  category,
 		Providers: providers,
 	}, nil
+}
+
+// applyModelOptions adds the model selector links of a local model provider. Instances lists the
+// Running and connected models; the UI appends the provider_id and model of its selection.
+// Recommendations are the service's own, and only set when it declares some.
+func applyModelOptions(provider *types.DeployOptionsProvider, componentType types.ComponentType, service *types.Service) {
+	provider.Models = &types.DeployOptionsLink{
+		Name: componentType.Name,
+		URL:  fmt.Sprintf(constants.CatalogModelsURLFormat, constants.DeploymentTypeLocal, componentType.ID),
+	}
+	provider.Instances = &types.DeployOptionsLink{
+		Name: "Instances",
+		URL:  fmt.Sprintf(constants.ModelInstancesURLFormat, dbmodels.ComponentStatusRunning, dbmodels.ConnectorStatusConnected),
+	}
+
+	if service != nil {
+		provider.Recommendations = service.ModelRecommendations(componentType.ID, provider.ID)
+	}
 }
 
 // buildProvider builds a DeployOptionsProvider from a component, including version, resources and schema if applicable.

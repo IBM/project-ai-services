@@ -6,6 +6,7 @@ type CreateFlags struct {
 	SkipValidation string
 	Template       string
 	Params         string
+	Model          string
 	Values         string
 	Legacy         string
 	WorkerName     string
@@ -25,6 +26,7 @@ var Create = CreateFlags{
 	SkipValidation: "skip-validation",
 	Template:       "template",
 	Params:         "params",
+	Model:          "model",
 	Values:         "values",
 	Legacy:         "legacy",
 	WorkerName:     "worker",
