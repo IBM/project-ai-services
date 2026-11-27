@@ -71,7 +71,6 @@ type DownloadModel struct {
 // The worker polls the container until it exits and returns an error if the
 // exit code was non-zero.
 type CheckModelDownload struct {
-	Model       string `json:"model"`
 	ContainerID string `json:"container_id"`
 }
 

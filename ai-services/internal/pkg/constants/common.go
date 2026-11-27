@@ -16,6 +16,8 @@ const (
 	// PredictorWaitTimeout is the maximum time to wait for a KServe InferenceService
 	// to reach Ready=True after a Helm install.
 	PredictorWaitTimeout = 15 * time.Minute
+	// ModelDownloadTimeout is the maximum time to wait for a model download container to exit.
+	ModelDownloadTimeout = 15 * time.Minute
 	// IsvcPollInterval is the interval between KServe InferenceService readiness polls.
 	IsvcPollInterval       = 15 * time.Second
 	VersionV2              = "v2"

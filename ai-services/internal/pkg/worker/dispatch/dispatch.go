@@ -380,7 +380,7 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 
 		// WaitForModelDownload polls the container until it exits and returns
 		// an error if the exit code was non-zero.
-		return nil, helpers.WaitForModelDownload(ctx, req.Model, req.ContainerID)
+		return nil, helpers.WaitForModelDownload(ctx, req.ContainerID)
 
 	// ── Caddy proxy management ────────────────────────────────────────────────
 

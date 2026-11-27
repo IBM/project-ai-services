@@ -109,7 +109,6 @@ func downloadModelsRemote(ctx context.Context, rt *remoteruntime.RemoteRuntime, 
 			defer wg.Done()
 
 			if _, err := rt.Send(waitCtx, workerpb.CommandType_COMMAND_TYPE_CHECK_MODEL_DOWNLOAD, payload.CheckModelDownload{
-				Model:       modelName,
 				ContainerID: containerID,
 			}); err != nil {
 				fail(fmt.Errorf("model download failed for %s: %w", modelName, err))

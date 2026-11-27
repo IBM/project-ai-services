@@ -59,10 +59,7 @@ const (
 	// HTTP proxy tunnel through the gRPC stream.
 	// The control plane sends an HTTP request; the worker executes it locally
 	// against a pod endpoint and returns the response.
-	CommandType_COMMAND_TYPE_HTTP_PROXY CommandType = 26
-	// Start downloading a model on the worker.
-	// The worker launches the tools container and returns the container ID
-	// immediately without waiting for the download to finish.
+	CommandType_COMMAND_TYPE_HTTP_PROXY            CommandType = 26
 	CommandType_COMMAND_TYPE_DOWNLOAD_MODEL        CommandType = 27
 	CommandType_COMMAND_TYPE_FIND_FREE_SPYRE_CARDS CommandType = 28
 	CommandType_COMMAND_TYPE_GET_BASE_DIR          CommandType = 29

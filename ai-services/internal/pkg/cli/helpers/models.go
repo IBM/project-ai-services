@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,8 +17,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-	"go.podman.io/podman/v6/libpod/define"
-	"go.podman.io/podman/v6/pkg/bindings/containers"
 	"go.podman.io/podman/v6/pkg/specgen"
 )
 
@@ -138,61 +137,27 @@ func StartModelDownloadContainer(ctx context.Context, model, targetDir string) (
 	return containerID, nil
 }
 
-// WaitForModelDownload polls the container identified by containerID until it
-// exits, then returns an error if the exit code was non-zero.
+// WaitForModelDownload waits for the download container identified by containerID to exit
+// (bounded by constants.ModelDownloadTimeout) and returns an error if the download failed.
 // It respects ctx cancellation so it integrates cleanly with deployment timeouts.
-func WaitForModelDownload(ctx context.Context, model, containerID string) error {
+func WaitForModelDownload(ctx context.Context, containerID string) error {
 	runtimeClient, err := podman.NewPodmanClient()
 	if err != nil {
 		return fmt.Errorf("failed to create podman client: %w", err)
 	}
 
-	for {
-		data, err := containers.Inspect(runtimeClient.Context, containerID, nil)
-		if err != nil {
-			return fmt.Errorf("failed to inspect model download container %s: %w", containerID, err)
+	ctx, stop := context.WithTimeout(ctx, constants.ModelDownloadTimeout)
+	defer stop()
+
+	if err := runtimeClient.WaitForContainerExit(ctx, containerID, modelDownloadPollInterval); err != nil {
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			return fmt.Errorf("model download timed out after %s: %w", constants.ModelDownloadTimeout, err)
+		case errors.Is(err, context.Canceled):
+			return fmt.Errorf("model download wait cancelled: %w", err)
+		default:
+			return fmt.Errorf("model download failed: %w", err)
 		}
-
-		// Only a container that has really exited carries a valid exit code. Other states
-		// (running, stopping, removing, paused, created) report ExitCode 0 and must not be
-		// mistaken for a successful download.
-		if status := data.State.Status; status == define.ContainerStateExited.String() || status == define.ContainerStateStopped.String() {
-			return checkDownloadExitCode(ctx, runtimeClient, model, containerID, data)
-		}
-
-		// Container has not exited yet — wait before polling again.
-		select {
-		case <-ctx.Done():
-			// Wait cancelled (e.g. deployment deleted mid-download): force-remove the
-			// container, which stops it.
-			_, _ = containers.Remove(runtimeClient.Context, containerID, new(containers.RemoveOptions).WithForce(true))
-
-			return fmt.Errorf("model download wait cancelled: %w", ctx.Err())
-		case <-time.After(modelDownloadPollInterval):
-		}
-	}
-}
-
-// checkDownloadExitCode removes the stopped container and returns an error if
-// the download failed.
-func checkDownloadExitCode(ctx context.Context, runtimeClient *podman.PodmanClient, model, containerID string, data *define.InspectContainerData) error {
-	exitCode := data.State.ExitCode
-	containerErr := data.State.Error
-	oomKilled := data.State.OOMKilled
-
-	// Remove the container now that we've collected its state.
-	_, _ = containers.Remove(runtimeClient.Context, containerID, nil)
-
-	if exitCode != 0 {
-		msg := fmt.Sprintf("model %s download failed with exit code %d", model, exitCode)
-		if oomKilled {
-			msg += " (OOM killed)"
-		}
-		if containerErr != "" {
-			msg += ": " + containerErr
-		}
-
-		return fmt.Errorf("%s", msg)
 	}
 
 	logger.InfolnCtx(ctx, "Model downloaded successfully")
@@ -209,5 +174,5 @@ func DownloadModelContainer(ctx context.Context, model, targetDir string) error 
 		return err
 	}
 
-	return WaitForModelDownload(ctx, model, containerID)
+	return WaitForModelDownload(ctx, containerID)
 }
