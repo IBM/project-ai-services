@@ -2824,7 +2824,7 @@ Applications:
   - my-rag-app
 ```
 
-Empty values print as `-`. `Worker` is `-` for remote models and for local models on the control-plane Podman socket. `Parameters` is shown only when the model has non-secret params, and endpoints with no URL are omitted.
+Empty values print as `-`. `Worker` is `-` for remote models and for local models on the control-plane Podman socket. `Parameters` is shown only when the model has non-secret params, `Applications` only when at least one application uses the model, and endpoints with no URL are omitted.
 
 ---
 
