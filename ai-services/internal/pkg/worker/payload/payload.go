@@ -75,14 +75,6 @@ type CheckModelDownload struct {
 	ContainerID string `json:"container_id"`
 }
 
-// ModelDownloadStatus is the wire response for COMMAND_TYPE_CHECK_MODEL_DOWNLOAD.
-type ModelDownloadStatus struct {
-	// Done is true when the container is no longer running (exited or removed).
-	Done bool `json:"done"`
-	// ExitCode is the container exit code. Only meaningful when Done is true.
-	ExitCode int32 `json:"exit_code"`
-}
-
 // ─── Network ──────────────────────────────────────────────────────────────────
 
 type ListRoutes struct {

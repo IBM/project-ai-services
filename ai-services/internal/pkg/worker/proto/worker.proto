@@ -142,8 +142,9 @@ enum CommandType {
   // Delete all Kubernetes secrets matching a label selector on an OpenShift worker.
   COMMAND_TYPE_DELETE_SECRETS            = 38;
 
-  // Poll whether a previously-started model download container has finished.
+  // Wait for a previously-started model download container to exit.
   // The control plane sends the container ID returned by COMMAND_TYPE_DOWNLOAD_MODEL;
-  // the worker inspects the container and returns its exit code and a done flag.
+  // the worker blocks until the container exits and fails the command if the
+  // exit code was non-zero.
   COMMAND_TYPE_CHECK_MODEL_DOWNLOAD      = 39;
 }

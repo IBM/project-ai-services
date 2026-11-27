@@ -61,37 +61,13 @@ func DownloadModels(ctx context.Context, rt runtime.Runtime, models []string) er
 	return nil
 }
 
-// downloadModelsRemote starts all model download containers on the remote worker
-// (step 1), then waits for each one to complete (step 2).
+// downloadModelsRemote starts each model download container on the remote worker
+// (step 1) and begins waiting for it to complete (step 2) as soon as it has started.
+//
+// Starts and waits share one cancellable context: if the caller cancels (e.g. the
+// deployment is deleted), a start fails, or any download fails, every in-flight wait
+// is cancelled so the worker stops the remaining download containers.
 func downloadModelsRemote(ctx context.Context, rt *remoteruntime.RemoteRuntime, models []string) error {
-	type modelContainer struct {
-		model       string
-		containerID string
-	}
-
-	started := make([]modelContainer, 0, len(models))
-
-	for _, modelName := range models {
-		logger.InfofCtx(ctx, "Downloading model: %s\n", modelName)
-
-		res, err := rt.Send(ctx, workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL, payload.DownloadModel{
-			Model: modelName,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to start model download %s: %w", modelName, err)
-		}
-
-		var containerID string
-		if err := json.Unmarshal(res.GetData(), &containerID); err != nil {
-			return fmt.Errorf("failed to decode container ID for model %s: %w", modelName, err)
-		}
-
-		started = append(started, modelContainer{model: modelName, containerID: containerID})
-	}
-
-	// Wait on all downloads concurrently under one cancellable context: if the caller
-	// cancels (e.g. the deployment is deleted) or any download fails, every in-flight
-	// wait is cancelled so the worker stops the remaining download containers.
 	waitCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -101,20 +77,42 @@ func downloadModelsRemote(ctx context.Context, rt *remoteruntime.RemoteRuntime, 
 		firstErr error
 	)
 
-	for _, mc := range started {
+	fail := func(err error) {
+		once.Do(func() {
+			firstErr = err
+			cancel()
+		})
+	}
+
+	for _, modelName := range models {
+		logger.InfofCtx(ctx, "Downloading model: %s\n", modelName)
+
+		res, err := rt.Send(waitCtx, workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL, payload.DownloadModel{
+			Model: modelName,
+		})
+		if err != nil {
+			fail(fmt.Errorf("failed to start model download %s: %w", modelName, err))
+
+			break
+		}
+
+		var containerID string
+		if err := json.Unmarshal(res.GetData(), &containerID); err != nil {
+			fail(fmt.Errorf("failed to decode container ID for model %s: %w", modelName, err))
+
+			break
+		}
+
 		wg.Add(1)
 
 		go func() {
 			defer wg.Done()
 
 			if _, err := rt.Send(waitCtx, workerpb.CommandType_COMMAND_TYPE_CHECK_MODEL_DOWNLOAD, payload.CheckModelDownload{
-				Model:       mc.model,
-				ContainerID: mc.containerID,
+				Model:       modelName,
+				ContainerID: containerID,
 			}); err != nil {
-				once.Do(func() {
-					firstErr = fmt.Errorf("model download failed for %s: %w", mc.model, err)
-					cancel()
-				})
+				fail(fmt.Errorf("model download failed for %s: %w", modelName, err))
 			}
 		}()
 	}

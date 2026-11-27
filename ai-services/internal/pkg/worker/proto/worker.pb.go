@@ -85,9 +85,10 @@ const (
 	CommandType_COMMAND_TYPE_CANCEL CommandType = 37
 	// Delete all Kubernetes secrets matching a label selector on an OpenShift worker.
 	CommandType_COMMAND_TYPE_DELETE_SECRETS CommandType = 38
-	// Poll whether a previously-started model download container has finished.
+	// Wait for a previously-started model download container to exit.
 	// The control plane sends the container ID returned by COMMAND_TYPE_DOWNLOAD_MODEL;
-	// the worker inspects the container and returns its exit code and a done flag.
+	// the worker blocks until the container exits and fails the command if the
+	// exit code was non-zero.
 	CommandType_COMMAND_TYPE_CHECK_MODEL_DOWNLOAD CommandType = 39
 )
 

@@ -34,6 +34,10 @@ func handleMock(rt runtime.Runtime, cmd *workerpb.Command) (data []byte, handled
 
 		return data, true, err
 
+	case workerpb.CommandType_COMMAND_TYPE_CHECK_MODEL_DOWNLOAD:
+		// No real container to wait on; report the download as finished.
+		return nil, true, nil
+
 	case workerpb.CommandType_COMMAND_TYPE_FIND_FREE_SPYRE_CARDS:
 		data, err := marshalOr(mc.FreeSpyreCards(), nil)
 

@@ -116,8 +116,9 @@ func StartModelDownloadContainer(ctx context.Context, model, targetDir string) (
 			`HF_HUB_OFFLINE=1 hf download "$0" --local-dir "/models/$0"; }`,
 		model,
 	}
-	rm := true
-	s.Remove = &rm
+	// Not auto-removed: WaitForModelDownload must read the exit code first, then removes
+	// the container itself. With Remove=true the container vanishes on exit and a failed
+	// download would be indistinguishable from a successful one.
 
 	// Convert mounts
 	s.Mounts = []spec.Mount{
@@ -147,38 +148,29 @@ func WaitForModelDownload(ctx context.Context, model, containerID string) error 
 	}
 
 	for {
-		if err := ctx.Err(); err != nil {
-			stopDownloadContainer(runtimeClient, containerID)
-
-			return fmt.Errorf("model download wait cancelled: %w", err)
-		}
-
 		data, err := containers.Inspect(runtimeClient.Context, containerID, nil)
 		if err != nil {
-			// Container may have been removed after exiting — treat as not found.
-			return nil
+			return fmt.Errorf("failed to inspect model download container %s: %w", containerID, err)
 		}
 
-		if !data.State.Running {
+		// Only a container that has really exited carries a valid exit code. Other states
+		// (running, stopping, removing, paused, created) report ExitCode 0 and must not be
+		// mistaken for a successful download.
+		if status := data.State.Status; status == define.ContainerStateExited.String() || status == define.ContainerStateStopped.String() {
 			return checkDownloadExitCode(ctx, runtimeClient, model, containerID, data)
 		}
 
-		// Container is still running — wait before polling again.
+		// Container has not exited yet — wait before polling again.
 		select {
 		case <-ctx.Done():
-			stopDownloadContainer(runtimeClient, containerID)
+			// Wait cancelled (e.g. deployment deleted mid-download): force-remove the
+			// container, which stops it.
+			_, _ = containers.Remove(runtimeClient.Context, containerID, new(containers.RemoveOptions).WithForce(true))
 
 			return fmt.Errorf("model download wait cancelled: %w", ctx.Err())
 		case <-time.After(modelDownloadPollInterval):
 		}
 	}
-}
-
-// stopDownloadContainer stops a download container whose wait was cancelled (e.g. the
-// deployment was deleted mid-download). The container is created with Remove=true, so it
-// is removed automatically once stopped.
-func stopDownloadContainer(runtimeClient *podman.PodmanClient, containerID string) {
-	_ = containers.Stop(runtimeClient.Context, containerID, nil)
 }
 
 // checkDownloadExitCode removes the stopped container and returns an error if
