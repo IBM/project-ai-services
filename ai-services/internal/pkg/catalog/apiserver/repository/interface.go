@@ -35,8 +35,10 @@ type DatasourceServiceInterface interface {
 	// CreateDatasource validates the request, tests the connection, encrypts credentials,
 	// and persists a new datasource connector record.
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
-	// ConnectDatasourcesToApplication links one or more datasource connectors to each eligible service in a running application.
-	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+	// ConnectDatasourcesToApplication links one or more datasource connectors to each eligible service in a
+	// running application. policy controls whether the allow_connect catalog flag is enforced:
+	// pass types.EnforceAllowConnect for the HTTP endpoint, types.SkipAllowConnect for the deploy path.
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, policy types.ConnectPolicy) (*apimodels.ConnectDatasourcesResponse, error)
 	// DisconnectDatasourcesFromApplication removes a single datasource connector from each
 	// eligible service in a running application and removes the service_dependency record.
 	DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceID uuid.UUID) error
