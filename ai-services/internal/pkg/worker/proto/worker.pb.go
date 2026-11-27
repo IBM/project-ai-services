@@ -514,7 +514,7 @@ const file_worker_proto_rawDesc = "" +
 	"\x05error\x18\x04 \x01(\tR\x05error\x12!\n" +
 	"\fis_heartbeat\x18\x05 \x01(\bR\visHeartbeat\x12\x1f\n" +
 	"\vworker_name\x18\x06 \x01(\tR\n" +
-	"workerName*\xb4\t\n" +
+	"workerName*\xdb\t\n" +
 	"\vCommandType\x12\x1c\n" +
 	"\x18COMMAND_TYPE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18COMMAND_TYPE_LIST_IMAGES\x10\x01\x12\x1b\n" +
@@ -554,8 +554,7 @@ const file_worker_proto_rawDesc = "" +
 	"\x1dCOMMAND_TYPE_DELETE_NAMESPACE\x10#\x12\x1e\n" +
 	"\x1aCOMMAND_TYPE_UPDATE_SECRET\x10$\x12\x17\n" +
 	"\x13COMMAND_TYPE_CANCEL\x10%\x12\x1f\n" +
-	"\x1bCOMMAND_TYPE_DELETE_SECRETS\x10&2\x97\x01\n" +
-	"\x19COMMAND_TYPE_GET_BASE_DIR\x10\x1d\x12%\n" +
+	"\x1bCOMMAND_TYPE_DELETE_SECRETS\x10&\x12%\n" +
 	"!COMMAND_TYPE_CHECK_MODEL_DOWNLOAD\x10'2\x97\x01\n" +
 	"\rWorkerGateway\x12C\n" +
 	"\bRegister\x12\x1a.worker.v1.RegisterRequest\x1a\x1b.worker.v1.RegisterResponse\x12A\n" +
