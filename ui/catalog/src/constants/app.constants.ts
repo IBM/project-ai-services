@@ -60,5 +60,3 @@ export const PROVIDER_TAG_LABELS: Record<string, string> = {
   amd: "AMD GPU",
   hosted_vllm: "Remote",
 };
-// Provider ID of the IBM Db2 for i data source connector.
-export const DB2_FOR_I_PROVIDER_ID = "db2_for_i";

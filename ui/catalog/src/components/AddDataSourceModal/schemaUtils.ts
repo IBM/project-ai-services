@@ -13,11 +13,13 @@ export interface ConnectorField {
   maximum?: number;
   controlledBy?: string;
   hideWhenChecked?: boolean;
+  requiredWhenVisible?: boolean;
+  alwaysVisible?: boolean;
 }
 
-// Fields shown only while a checkbox is unchecked are mandatory when visible
+// Fields declaring x-ui-required-when-visible are mandatory whenever shown
 export function isRequiredWhenVisible(field: ConnectorField): boolean {
-  return field.isRequired || (!!field.controlledBy && !!field.hideWhenChecked);
+  return field.isRequired || !!field.requiredWhenVisible;
 }
 
 export function isNumericField(field: ConnectorField): boolean {
@@ -103,6 +105,8 @@ export function parseConnectorSchema(
       maximum: property.maximum,
       controlledBy: property["x-ui-controlled-by"],
       hideWhenChecked: property["x-ui-hide-when-checked"],
+      requiredWhenVisible: property["x-ui-required-when-visible"],
+      alwaysVisible: property["x-ui-always-visible"],
     });
   }
 

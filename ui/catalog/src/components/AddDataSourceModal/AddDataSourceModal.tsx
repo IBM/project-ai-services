@@ -32,7 +32,6 @@ import {
 } from "./schemaUtils";
 import { transformToCreateDatasourcePayload } from "./datasourceTransform";
 import { useConnectorsStore } from "@/store/connectors.store";
-import { DB2_FOR_I_PROVIDER_ID } from "@/constants/app.constants";
 import { parseMessageCheckType } from "@/components/ConnectorDetailsPanel/types";
 import styles from "./AddDataSourceModal.module.scss";
 
@@ -558,17 +557,17 @@ const AddDataSourceModal = ({
         {!paramsLoading &&
           !paramsError &&
           sections.map((section) => {
-            // Db2 for i shows its optional port inline instead of behind "Add prefix +"
-            const isLocationSection =
-              section.title === "Location" &&
-              selectedType?.provider.id !== DB2_FOR_I_PROVIDER_ID;
+            const isLocationSection = section.title === "Location";
+            // Optional fields flagged x-ui-always-visible stay inline instead of behind "Add prefix +"
+            const isCollapsibleOptional = (f: ConnectorField) =>
+              f.isOptional && !f.alwaysVisible;
             const visibleFields = isLocationSection
               ? section.fields.filter(
-                  (f) => !f.isOptional || showLocationOptionals,
+                  (f) => !isCollapsibleOptional(f) || showLocationOptionals,
                 )
               : section.fields;
             const hiddenOptionals = isLocationSection
-              ? section.fields.filter((f) => f.isOptional)
+              ? section.fields.filter(isCollapsibleOptional)
               : [];
 
             const sectionError = sectionErrors[section.title];

@@ -517,6 +517,10 @@ export interface ParamProperty {
   "ui:section"?: string;
   "x-ui-controlled-by"?: string;
   "x-ui-hide-when-checked"?: boolean;
+  /** Field is mandatory whenever it is visible, even if not in `required` */
+  "x-ui-required-when-visible"?: boolean;
+  /** Optional field is always rendered inline instead of behind "Add prefix +" */
+  "x-ui-always-visible"?: boolean;
 }
 
 /** Full response from GET /api/v1/connectors/datasource/providers/:id/params */
