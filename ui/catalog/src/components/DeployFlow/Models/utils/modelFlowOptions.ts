@@ -73,15 +73,11 @@ export const isConfigResolved = (
 export const isValidModelName = (name: string): boolean =>
   MODEL_NAME_PATTERN.test(name.trim());
 
-// Dropdown label, e.g. "Default (cards: 1, memory: 24 GB)"
-export const profileLabel = (profile: ModelDeployProfile): string => {
-  const cards = Object.values(profile.resources.accelerators ?? {}).reduce(
-    (sum, count) => sum + count,
-    0,
-  );
-  const memory = bytesToGB(profile.resources.memory ?? 0);
-  return `${profile.name} (cards: ${cards}, memory: ${memory} GB)`;
-};
+// Dropdown label: the profile name followed by the API description
+export const profileLabel = (profile: ModelDeployProfile): string =>
+  profile.description
+    ? `${profile.name} (${profile.description})`
+    : profile.name;
 
 // Converts profile resources (bytes) to GB for the requirements tiles
 export const profileToCalculatedResources = (
