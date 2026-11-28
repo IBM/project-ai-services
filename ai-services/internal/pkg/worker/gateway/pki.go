@@ -191,7 +191,13 @@ func serverCertDNSNames(ctx context.Context, runtimeType types.RuntimeType) ([]s
 			return nil, fmt.Errorf("resolve gateway route host for cert SAN: %w", err)
 		}
 
-		return []string{route, catalogutils.OpenShiftCatalogServiceEndpoint()}, nil
+		// A remote worker's LiteLLM egress dials the control-plane Caddy through its own Route.
+		caddyRoute, err := catalogutils.CaddyRouteHost(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("resolve control-plane Caddy route host for cert SAN: %w", err)
+		}
+
+		return []string{route, caddyRoute, catalogutils.OpenShiftCatalogServiceEndpoint()}, nil
 	case types.RuntimeTypePodman:
 		domainSuffix := utils.GetEnv(proxy.DomainSuffixEnvVar, "")
 		if domainSuffix == "" {

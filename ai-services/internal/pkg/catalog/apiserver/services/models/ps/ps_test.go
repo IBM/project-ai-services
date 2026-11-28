@@ -46,6 +46,10 @@ func (f *fakeWorkerResolver) DomainSuffix(_ string) (string, error) {
 	return ".nip.io", f.err
 }
 
+func (f *fakeWorkerResolver) PrivateIngressHost(name string) (string, error) {
+	return name + ".nip.io", f.err
+}
+
 func (f *fakeWorkerResolver) PrivateIngressPort(_ string) string {
 	return "8080"
 }

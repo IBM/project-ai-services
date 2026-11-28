@@ -30,57 +30,32 @@ func (r *recordingProxy) RegisterEgressRoute(_ context.Context, route proxy.Egre
 }
 
 func TestLiteLLMEgressRoute(t *testing.T) {
-	t.Run("targets the control-plane private ingress over mTLS", func(t *testing.T) {
-		t.Setenv(proxy.DomainSuffixEnvVar, "example.com")
-		t.Setenv(proxy.CaddyPrivateIngressPortEnvVar, "9444")
+	r := LiteLLMEgressRoute("catalog-worker-gateway.example.com", "9444")
 
-		r, err := LiteLLMEgressRoute()
-
-		require.NoError(t, err)
-		assert.Equal(t, workerconstants.LiteLLMEgressRouteID, r.ID)
-		assert.Equal(t, workerconstants.LiteLLMPathPrefix, r.PathPrefix)
-		assert.Equal(t, "catalog-worker-gateway.example.com:9444", r.DialUpstream)
-		assert.Equal(t, "catalog-worker-gateway.example.com", r.ServerName)
-		assert.Equal(t, "/data/worker-tls/tls.crt", r.ClientCertPath)
-		assert.Equal(t, "/data/worker-tls/tls.key", r.EncryptedClientKeyPath)
-		assert.Equal(t, "/data/worker-tls/ca.crt", r.TrustedCACertPath)
-		assert.Equal(t, "/etc/secret/worker-mtls-encryption-secret/mtls-encryption-key", r.SecretFilePath)
-	})
-
-	t.Run("defaults to the standard private ingress port", func(t *testing.T) {
-		t.Setenv(proxy.DomainSuffixEnvVar, "example.com")
-		t.Setenv(proxy.CaddyPrivateIngressPortEnvVar, "")
-
-		r, err := LiteLLMEgressRoute()
-
-		require.NoError(t, err)
-		assert.Equal(t, "catalog-worker-gateway.example.com:"+proxy.DefaultPrivateIngressPort, r.DialUpstream)
-	})
-
-	t.Run("fails without a domain suffix", func(t *testing.T) {
-		t.Setenv(proxy.DomainSuffixEnvVar, "")
-
-		_, err := LiteLLMEgressRoute()
-
-		assert.Error(t, err)
-	})
+	assert.Equal(t, workerconstants.LiteLLMEgressRouteID, r.ID)
+	assert.Equal(t, workerconstants.LiteLLMPathPrefix, r.PathPrefix)
+	assert.Equal(t, "catalog-worker-gateway.example.com:9444", r.DialUpstream)
+	assert.Equal(t, "catalog-worker-gateway.example.com", r.ServerName)
+	assert.Equal(t, "/data/worker-tls/tls.crt", r.ClientCertPath)
+	assert.Equal(t, "/data/worker-tls/tls.key", r.EncryptedClientKeyPath)
+	assert.Equal(t, "/data/worker-tls/ca.crt", r.TrustedCACertPath)
+	assert.Equal(t, "/etc/secret/worker-mtls-encryption-secret/mtls-encryption-key", r.SecretFilePath)
 }
 
 func TestRegisterLiteLLMEgress(t *testing.T) {
-	t.Setenv(proxy.DomainSuffixEnvVar, "example.com")
-
 	t.Run("success on first attempt", func(t *testing.T) {
 		rp := &recordingProxy{}
-		err := RegisterLiteLLMEgress(context.Background(), rp, "w1")
+		err := RegisterLiteLLMEgress(context.Background(), rp, "w1", "caddy.apps.example.com", "443")
 		require.NoError(t, err)
 		require.Len(t, rp.egress, 1)
+		assert.Equal(t, "caddy.apps.example.com:443", rp.egress[0].DialUpstream)
 	})
 
 	t.Run("retries on error", func(t *testing.T) {
 		rp := &recordingProxy{errs: []error{errors.New("temporarily down")}}
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // cancel immediately to avoid sleeping in test
-		err := RegisterLiteLLMEgress(ctx, rp, "w1")
+		err := RegisterLiteLLMEgress(ctx, rp, "w1", "caddy.apps.example.com", "443")
 		require.Error(t, err)
 	})
 }
