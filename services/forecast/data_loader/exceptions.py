@@ -41,6 +41,19 @@ class DBConnectionError(DataLoaderError):
     is_permanent_failure: bool = False
 
 
+class DBTLSConfigError(DataLoaderError):
+    """Raised when the TLS configuration of the Db2 connection is unusable.
+
+    That is the case when a certificate and allow_insecure_connection are both set or both missing, when the
+    certificate is not a valid PEM certificate, or when the server's certificate does not verify against it.
+    None of these is fixed by trying again.
+
+    The message never contains the certificate content.
+    """
+
+    is_permanent_failure: bool = True
+
+
 class DBAuthError(DataLoaderError):
     """Raised when Db2 credentials or authentication fails."""
 

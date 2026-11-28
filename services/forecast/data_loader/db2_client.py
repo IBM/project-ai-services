@@ -7,6 +7,7 @@ and server-side streaming cursor execution.
 from __future__ import annotations
 
 import logging
+import ssl
 import time
 from dataclasses import dataclass, field
 from typing import Any, Iterator, List, Optional, Sequence, Tuple
@@ -16,6 +17,7 @@ from forecast.data_loader.exceptions import (
     DBColumnNotFoundError,
     DBConnectionError,
     DBTableNotFoundError,
+    DBTLSConfigError,
     InvalidTableReferenceError,
 )
 from forecast.settings import settings
@@ -26,6 +28,21 @@ logger = logging.getLogger(__name__)
 # MM/DD/YY with a two-digit year); ISO gives YYYY-MM-DD, which can be parsed without guessing.
 # TIME is left at its default hh:mm:ss, since ISO time would use dots as separators.
 _JOB_OPTIONS = {"date format": "iso"}
+
+
+def _is_certificate_failure(exc: BaseException) -> bool:
+    """Tell whether a connect error is the server certificate failing verification.
+
+    Mapepire may re-raise the SSL error as a plain exception, so the text is checked as well
+    as the type, along the whole chain of causes.
+    """
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, ssl.SSLCertVerificationError) or "certificate_verify_failed" in str(exc).lower():
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
 
 
 @dataclass
@@ -68,10 +85,23 @@ class Db2Client:
         port: int = settings.forecast.mapepire_port,
         connect_timeout: int = settings.forecast.connector_connect_timeout_s,
         query_timeout: int = settings.forecast.connector_query_timeout_s,
-        ignore_unauthorized: bool = False,
-        ca_cert: Optional[str | bytes] = None,
+        certificate: Optional[str] = None,
+        allow_insecure_connection: bool = False,
         custom_connection: Optional[Any] = None,
     ) -> None:
+        """Create a client. The connection is always TLS; the arguments decide how it is checked.
+
+        - ``certificate`` set and ``allow_insecure_connection`` false: the server certificate and
+          host name are verified against the system trust store plus that certificate (PEM content
+          from the connector's connection details).
+        - ``certificate`` empty and ``allow_insecure_connection`` true: no certificate is used at
+          all. Nothing is loaded, not even the system trust store, and Mapepire's
+          ``ignoreUnauthorized`` is set.
+        - Both, or neither, is a configuration error (DBTLSConfigError, raised on connect). The API
+          already stores such a connector as FAILED, so this is only a backstop.
+
+        The server's own certificate is never fetched or trusted by the client.
+        """
         self.host = host
         self.database = database
         self.username = username
@@ -79,10 +109,47 @@ class Db2Client:
         self.port = port
         self.connect_timeout = connect_timeout
         self.query_timeout = query_timeout
-        self.ignore_unauthorized = ignore_unauthorized
-        self.ca_cert = ca_cert
+        self.certificate = certificate or None
+        self.allow_insecure_connection = bool(allow_insecure_connection)
         self._conn = custom_connection
         self._server: Optional[Any] = None
+
+    def _build_ssl_context(self) -> ssl.SSLContext:
+        """Return the TLS context: the system trust store plus the certificate, or no certificates.
+
+        With allow_insecure_connection the context has nothing loaded and does no verification.
+        With a certificate, DBTLSConfigError is raised when it is not valid PEM. The message
+        never shows its content. Both set, or neither, is a DBTLSConfigError too.
+        """
+        # The API stores such a connector as FAILED, so only an old or hand-written one gets here.
+        if self.allow_insecure_connection == (self.certificate is not None):
+            raise DBTLSConfigError(
+                "The connector must have either a certificate or allow_insecure_connection, not both and not neither"
+            )
+        if self.allow_insecure_connection:
+            logger.warning(
+                "INSECURE Db2 connection to %s:%s: no certificate is used and the server certificate "
+                "is not verified because the connector sets allow_insecure_connection. The traffic is "
+                "encrypted but the server is not authenticated, so it can be impersonated. Add a "
+                "certificate to the connector to verify it",
+                self.host,
+                self.port,
+            )
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)  # loads no certificates at all
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            return context
+        context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)  # system trust store
+        try:
+            # A blank value loads nothing and would pass silently, so it is refused here.
+            if not self.certificate.strip():
+                raise ValueError
+            context.load_verify_locations(cadata=self.certificate)
+        except (ssl.SSLError, ValueError):
+            raise DBTLSConfigError(
+                "The connector's certificate does not contain a valid PEM certificate"
+            ) from None
+        return context
 
     def _limit_reads(self, seconds: float) -> None:
         """Set how long a single read from the Mapepire websocket may wait for a reply."""
@@ -106,6 +173,8 @@ class Db2Client:
             # Patch WebsocketConnection.connect to allow up to 64 MiB frames and to take
             # both timeouts from the DaemonServer: ``connect_timeout_s`` for opening the
             # socket and ``recv_timeout_s`` for each read (None means no limit).
+            # It also takes the TLS context from the DaemonServer (``ssl_context``, built by
+            # ``_build_ssl_context``) instead of Mapepire's own.
             if not getattr(mapepire_ws.WebsocketConnection, "_max_size_configured", False):
                 def _configured_ws_connect(ws_self):
                     server = ws_self.db2_server
@@ -113,7 +182,7 @@ class Db2Client:
                         ws_self.uri,
                         additional_headers=ws_self.headers,
                         open_timeout=getattr(server, "connect_timeout_s", 10),
-                        ssl=ws_self._create_ssl_context(server),
+                        ssl=server.ssl_context,
                         max_size=64 * 1024 * 1024,
                     )
                     recv = ws.recv
@@ -134,6 +203,8 @@ class Db2Client:
                 "pip install mapepire-python"
             ) from exc
 
+        ssl_context = self._build_ssl_context()
+
         logger.debug(
             "Connecting to IBM i Db2 via Mapepire: host=%s port=%s user=%s",
             self.host,
@@ -146,9 +217,11 @@ class Db2Client:
             user=self.username,
             password=self.password,
             port=self.port,
-            ignoreUnauthorized=self.ignore_unauthorized,
-            ca=self.ca_cert,
+            # Mapepire's own switch. The TLS context above is what the patched connect uses; this
+            # keeps the object saying the same thing.
+            ignoreUnauthorized=self.allow_insecure_connection,
         )
+        server.ssl_context = ssl_context
         # The connect request is answered within the connect timeout; once connected,
         # reads are limited by the query timeout.
         server.connect_timeout_s = self.connect_timeout
@@ -162,6 +235,13 @@ class Db2Client:
         except Exception as exc:
             err_str = str(exc).lower()
             logger.error("Db2 connection failure on %s:%s - %s", self.host, self.port, exc)
+            if _is_certificate_failure(exc):
+                # The server answered, but its certificate is not the one the connector trusts
+                # (wrong certificate, host name not in it, expired). Retrying cannot change that.
+                raise DBTLSConfigError(
+                    f"The certificate of Db2 host '{self.host}' was not accepted - {exc}. "
+                    "Check the connector's certificate and host, or use allow_insecure_connection."
+                ) from exc
             if any(kw in err_str for kw in ("password", "auth", "credentials", "not authorized", "user id", "unauthorized")):
                 raise DBAuthError(
                     f"Authentication failed for user '{self.username}' on Db2 host '{self.host}'"
