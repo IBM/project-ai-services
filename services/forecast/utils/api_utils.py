@@ -16,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError, TimeoutError as PoolTimeoutError
 from common.error_utils import APIError, ErrorCode
 from common.misc_utils import get_logger, get_utc_timestamp
 from forecast.db.connectors import ConnectorListRow, JobRow
+from forecast.db.models import JobStatus
 from forecast.models import (
     ConnectorListItem,
     Db2ForIDetails,
@@ -78,13 +79,13 @@ def job_item(row: JobRow) -> JobItem:
 
 def training_summary(jobs: list[JobRow]) -> TrainingSummary:
     """Summarize jobs ordered newest first."""
-    completed = [job for job in jobs if job.status == "COMPLETED"]
-    finished = [job for job in jobs if job.status in ("COMPLETED", "FAILED")]
+    completed = [job for job in jobs if job.status == JobStatus.COMPLETED]
+    finished = [job for job in jobs if job.status in (JobStatus.COMPLETED, JobStatus.FAILED)]
     last_finished = finished[0] if finished else None
     last_completed = completed[0] if completed else None
     return TrainingSummary(
         jobs_completed=len(completed),
-        jobs_failed=sum(job.status == "FAILED" for job in jobs),
+        jobs_failed=sum(job.status == JobStatus.FAILED for job in jobs),
         last_job_status=jobs[0].status if jobs else None,
         last_duration_seconds=(
             (last_finished.result or {}).get("training_seconds") if last_finished else None

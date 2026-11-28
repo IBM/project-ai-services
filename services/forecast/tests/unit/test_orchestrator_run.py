@@ -8,7 +8,7 @@ publish to the repository volume and the scratch directories are real, on a temp
 import asyncio
 import inspect
 import json
-from contextlib import contextmanager
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
@@ -65,39 +65,39 @@ class FakeRuns:
         self.started = []  # The connectors whose job was started.
         self.complete_error = None
 
-    def start_job(self, session, connector_id):
+    def start_job(self, connector_id):
         if self.start_error:
             raise self.start_error
         self.started.append(connector_id)
         return JOB_ID
 
-    def start_attempt(self, session, job_id):
+    def start_attempt(self, job_id):
         self.attempt_starts += 1
         self.message = None
         self.result = None
 
-    def read_training_job(self, session, job_id):
+    def read_training_job(self, job_id):
         if self.job_error:
             raise self.job_error
         return self.job
 
-    def read_message(self, session, job_id):
+    def read_message(self, job_id):
         return self.message
 
-    def set_result(self, session, job_id, result):
+    def set_result(self, job_id, result):
         self.result = result
         self.written_results.append(result)
 
-    def set_message(self, session, job_id, message):
+    def set_message(self, job_id, message):
         self.message = message
         self.written_messages.append(message)
 
-    def mark_completed(self, session, job_id, attempts):
+    def mark_completed(self, job_id, attempts):
         if self.complete_error:
             raise self.complete_error
         self.completed = (job_id, attempts)
 
-    def mark_failed(self, session, job_id, message, attempts):
+    def mark_failed(self, job_id, message, attempts):
         self.failed = (job_id, message, attempts)
 
 
@@ -174,12 +174,6 @@ def env(tmp_path, monkeypatch):
     fake_runs = FakeRuns()
     monkeypatch.setattr(orchestrator, "runs", fake_runs)
 
-    @contextmanager
-    def session():
-        yield None
-
-    monkeypatch.setattr(orchestrator, "get_db_session", session)
-
     sleeps = []
 
     async def sleep(seconds):
@@ -190,11 +184,16 @@ def env(tmp_path, monkeypatch):
     loaded = []
 
     async def load_model(name):
-        if isinstance(load_model.outcome, Exception):
-            raise load_model.outcome
+        load_model.calls += 1
+        # ``outcomes`` is what the next loads do, one each. Then ``outcome``, for every load that is left.
+        outcome = load_model.outcomes.pop(0) if load_model.outcomes else load_model.outcome
+        if isinstance(outcome, Exception):
+            raise outcome
         loaded.append(name)
 
     load_model.outcome = None
+    load_model.outcomes = []
+    load_model.calls = 0
     monkeypatch.setattr(orchestrator, "load_model", load_model)
 
     unloaded = []
@@ -240,6 +239,39 @@ def test_the_fake_database_has_the_signatures_of_the_real_module():
         assert list(inspect.signature(real).parameters) == list(inspect.signature(getattr(FakeRuns, name)).parameters)[1:], name
     used = {"start_job", "start_attempt", "read_training_job", "read_message", "set_result", "set_message", "mark_completed", "mark_failed"}
     assert used <= set(fakes)
+
+
+@pytest.mark.parametrize(
+    "loader, ending",
+    [((OK,), "mark_completed"), (((FAILS_FOR_GOOD, "gone"),), "mark_failed")],
+    ids=["a_run_that_completes", "a_run_that_fails"],
+)
+def test_no_database_call_runs_on_the_thread_of_the_event_loop(env, monkeypatch, loader, ending):
+    """The database layer is synchronous: on the loop it would stall the whole API while it waits."""
+    env.script(loader=loader)
+    threads = {}
+
+    def on_its_thread(name, function):
+        def call(*args):
+            threads.setdefault(name, set()).add(threading.get_ident())
+            return function(*args)
+
+        return call
+
+    for name in ("start_job", "start_attempt", "read_training_job", "read_message", "set_result", "set_message",
+                 "mark_completed", "mark_failed"):
+        monkeypatch.setattr(env.runs, name, on_its_thread(name, getattr(env.runs, name)))
+
+    async def run():
+        threads["loop"] = {threading.get_ident()}
+        await orchestrator.run_training(CONNECTOR_ID)
+
+    asyncio.run(run())
+
+    called = {name for name in threads if name != "loop"}
+    assert {"start_job", "start_attempt", "set_message", ending} <= called
+    for name in called:
+        assert not threads[name] & threads["loop"], name
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +361,36 @@ def test_the_message_and_result_of_an_earlier_attempt_are_cleared_when_a_run_sta
 
     assert env.processes.calls[0].message is None
     assert env.runs.written_results == [{"rows_read": 5}]
+
+
+def test_the_job_says_that_it_is_training_once_the_data_is_loaded(env):
+    run_training()
+
+    loader, worker = env.processes.calls
+    assert loader.message is None  # Nothing is said while the data is read.
+    assert worker.message == orchestrator._TRAINING  # It is there when the worker starts.
+    assert env.runs.written_messages == [orchestrator._TRAINING]
+
+
+def test_the_job_does_not_say_that_it_is_training_when_the_loader_failed(env):
+    env.script(loader=[(FAILS_FOR_GOOD, "Table SALES.ORDERS does not exist")])
+
+    run_training()
+
+    assert env.processes.of("training worker") == []
+    assert orchestrator._TRAINING not in env.runs.written_messages
+    assert env.runs.failed == (JOB_ID, "Table SALES.ORDERS does not exist", 1)
+
+
+def test_a_failed_worker_replaces_the_progress_text_and_each_attempt_sets_it_again(env):
+    env.script(loader=[OK, OK], worker=[FAILS, FAILS])
+
+    run_training()
+
+    failure = f"The training worker exited with code {EXIT_FAILURE}."
+    assert env.runs.written_messages == [orchestrator._TRAINING, failure, orchestrator._TRAINING, failure]
+    assert env.runs.message == failure
+    assert env.runs.failed == (JOB_ID, failure, 2)
 
 
 def test_every_attempt_starts_by_clearing_the_database_row_once(env):
@@ -681,7 +743,7 @@ def test_a_long_message_is_cut(env):
 # ---------------------------------------------------------------------------
 
 
-def test_a_forecaster_that_triton_cannot_load_is_removed_and_the_job_fails_without_a_retry(env):
+def test_a_forecaster_that_triton_cannot_load_is_removed_and_the_job_fails_after_the_last_load(env):
     env.load_model.outcome = TritonLoadError("Triton could not load forecaster x: bad model")
 
     run_training()
@@ -689,10 +751,77 @@ def test_a_forecaster_that_triton_cannot_load_is_removed_and_the_job_fails_witho
     assert env.runs.failed == (JOB_ID, "Triton could not load forecaster x: bad model", 1)
     assert env.runs.completed is None
     assert not (env.repository / NAME).exists()
-    # Unloaded first, with the directory still there: a load that timed out on the client may have completed.
-    assert env.unloaded == [(NAME, True)]
-    assert len(env.processes.of("training worker")) == 1  # The load is not retried.
+    # Unloaded after each load that failed, with the directory still there: a load that timed out on the
+    # client may have completed. The second one is the clean-up after the last load.
+    assert env.unloaded == [(NAME, True), (NAME, True)]
+    assert env.load_model.calls == 2  # TRAINING_MAX_ATTEMPTS, as the tests set it.
+    assert env.sleeps == [5]  # TRAINING_RETRY_DELAY_SECONDS, between the two loads only.
     assert not env.scratch.exists()
+
+
+def test_a_load_that_fails_once_is_retried_without_training_again(env):
+    env.load_model.outcomes = [TritonLoadError("Triton cannot be reached")]
+
+    run_training()
+
+    assert env.runs.completed == (JOB_ID, 1)  # The attempts of the training, not the loads.
+    assert env.runs.failed is None
+    assert env.loaded == [NAME]
+    assert env.load_model.calls == 2
+    assert env.unloaded == [(NAME, True)]  # Before the second load, with the directory in place.
+    assert env.sleeps == [5]
+    assert (env.repository / NAME / "1" / "model.onnx").read_bytes() == b"onnx"  # Published once, kept.
+    assert len(env.processes.of("data loader")) == 1 and len(env.processes.of("training worker")) == 1
+
+
+def test_a_load_is_not_retried_when_only_one_attempt_is_allowed(env, monkeypatch):
+    monkeypatch.setattr(settings.forecast, "training_max_attempts", 1)
+    env.load_model.outcome = TritonLoadError("Triton cannot be reached")
+
+    run_training()
+
+    assert env.runs.failed == (JOB_ID, "Triton cannot be reached", 1)
+    assert env.load_model.calls == 1
+    assert env.unloaded == [(NAME, True)]  # Only the clean-up.
+    assert env.sleeps == []
+
+
+def test_a_load_that_fails_for_another_reason_than_triton_is_not_retried(env):
+    env.load_model.outcome = RuntimeError("not a TritonLoadError")
+
+    run_training()
+
+    assert env.load_model.calls == 1
+    assert env.runs.failed == (
+        JOB_ID, "The training run failed with an unexpected RuntimeError. The details are in the log.", 1
+    )
+    assert env.sleeps == []
+
+
+def test_a_cancel_between_two_loads_unloads_and_removes_the_published_directory(env, monkeypatch):
+    env.load_model.outcome = TritonLoadError("Triton cannot be reached")
+    waiting = asyncio.Event()
+
+    async def sleep(seconds):
+        waiting.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(orchestrator, "_sleep", sleep)
+
+    async def run():
+        task = asyncio.ensure_future(orchestrator.run_training(CONNECTOR_ID))
+        await waiting.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(run())
+
+    assert env.unloaded == [(NAME, True), (NAME, True)]  # Before the wait, and the clean-up of the cancel.
+    assert not (env.repository / NAME).exists()
+    assert env.runs.completed is None
+    assert not env.scratch.exists()
+    assert not orchestrator._lock.locked()
 
 
 def test_a_forecaster_that_cannot_be_recorded_is_removed_again(env):
@@ -749,20 +878,21 @@ def test_a_cancel_during_the_load_unloads_and_removes_the_published_directory(en
 async def _cancel_while(env, monkeypatch, where):
     """Cancel run_training while ``where`` ("start_job" or a process name) waits for ever."""
     reached = asyncio.Event()
+    release = threading.Event()  # Lets the thread of start_job end, so that the loop can shut down.
 
     async def wait_for_ever():
         reached.set()
         await asyncio.Event().wait()
 
     if where == "start_job":
-        real_db = orchestrator._db
+        loop = asyncio.get_running_loop()
 
-        async def db(function, *args):
-            if function == env.runs.start_job:
-                await wait_for_ever()
-            return await real_db(function, *args)
+        def start_job(connector_id):
+            loop.call_soon_threadsafe(reached.set)
+            release.wait(timeout=10)
+            return JOB_ID
 
-        monkeypatch.setattr(orchestrator, "_db", db)
+        monkeypatch.setattr(env.runs, "start_job", start_job)
     else:
         scripted = env.processes
 
@@ -776,8 +906,11 @@ async def _cancel_while(env, monkeypatch, where):
     task = asyncio.ensure_future(orchestrator.run_training(CONNECTOR_ID))
     await reached.wait()
     task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release.set()
 
 
 @pytest.mark.parametrize("where", ["start_job", "data loader", "training worker"])
@@ -840,7 +973,7 @@ def test_an_unexpected_error_fails_the_job_and_its_details_stay_out_of_the_messa
 def test_a_database_that_cannot_record_the_failure_does_not_raise(env, caplog):
     env.script(loader=[(FAILS_FOR_GOOD, "gone")])
 
-    def broken(session, job_id, message, attempts):
+    def broken(job_id, message, attempts):
         raise RuntimeError("database is down")
 
     env.runs.mark_failed = broken

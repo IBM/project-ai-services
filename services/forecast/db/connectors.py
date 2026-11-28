@@ -14,7 +14,7 @@ from sqlalchemy import Select, exists, func, select, text, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from forecast.db.models import Connector, Forecaster, Job, TrainingConfig
+from forecast.db.models import Connector, ConnectorStatus, Forecaster, Job, JobStatus, TrainingConfig
 
 
 @dataclass(frozen=True)
@@ -89,7 +89,7 @@ def connector_exists(session: Session) -> bool:
 
 def count_queued_jobs(session: Session) -> int:
     """Return the number of jobs waiting to run."""
-    return session.scalar(select(func.count(Job.seq)).where(Job.status == "QUEUED")) or 0
+    return session.scalar(select(func.count(Job.seq)).where(Job.status == JobStatus.QUEUED)) or 0
 
 
 def insert_connector(
@@ -111,7 +111,7 @@ def insert_connector(
         name=name,
         type=connector_type,
         connection_details=config,
-        status="ACCEPTED",
+        status=ConnectorStatus.ACCEPTED,
     )
     training_config = TrainingConfig(
         connector_id=cid_uuid,

@@ -7,6 +7,7 @@ so these models must match that file. tests/unit/test_db_models.py checks this.
 
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import Optional
 
 from sqlalchemy import (
@@ -25,6 +26,24 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class ConnectorStatus(StrEnum):
+    """The values that chk_connectors_status allows. The column stays TEXT; a member is equal to its string."""
+
+    ACCEPTED = "ACCEPTED"
+    TRAINING = "TRAINING"
+    TRAINED = "TRAINED"
+    FAILED = "FAILED"
+
+
+class JobStatus(StrEnum):
+    """The values that chk_jobs_status allows. The column stays TEXT; a member is equal to its string."""
+
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
 
 
 class Base(DeclarativeBase):

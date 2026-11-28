@@ -1,10 +1,11 @@
 """
 Unit tests of the API's database access for a training run (db/runs.py).
 
-The session is a mock, so the tests check what is written and the SQL that is sent. They do not
-run the statements: the claim, and its conflict on idx_jobs_single_running, are not tested against
-PostgreSQL.
+The session is a mock that stands in for get_db_session, so the tests check what is written and the
+SQL that is sent. They do not run the statements: the claim, and its conflict on idx_jobs_single_running,
+are not tested against PostgreSQL.
 """
+from contextlib import contextmanager
 from unittest.mock import MagicMock
 from uuid import UUID
 
@@ -25,18 +26,41 @@ def sql(statement) -> str:
     return str(statement.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
 
 
-def make_session(job=None, connector=None):
-    session = MagicMock(name="session")
+@pytest.fixture
+def database(monkeypatch):
+    """``database()`` makes runs.get_db_session yield a mock session and returns it.
+
+    ``database.opened`` lists the sessions that were opened: one session is one transaction.
+    """
+    opened = []
+
+    def install(session=None):
+        session = session or MagicMock(name="session")
+
+        @contextmanager
+        def get_db_session():
+            opened.append(session)
+            yield session
+
+        monkeypatch.setattr(runs, "get_db_session", get_db_session)
+        return session
+
+    install.opened = opened
+    return install
+
+
+def make_session(database, job=None, connector=None):
+    session = database()
     objects = {(Job, 7): job, (Connector, CONNECTOR_ID): connector}
     session.get.side_effect = lambda model, key: objects[(model, key)]
     return session
 
 
-def test_start_job_inserts_a_running_job_and_sets_the_connector_training():
-    session = MagicMock()
+def test_start_job_inserts_a_running_job_and_sets_the_connector_training(database):
+    session = database()
     session.execute.return_value.scalar_one.return_value = 7
 
-    assert runs.start_job(session, CONNECTOR_ID) == 7
+    assert runs.start_job(CONNECTOR_ID) == 7
 
     job_insert, connector_update = (sql(call.args[0]) for call in session.execute.call_args_list)
     assert job_insert.startswith("INSERT INTO jobs (connector_id, status, started_at)")
@@ -46,39 +70,39 @@ def test_start_job_inserts_a_running_job_and_sets_the_connector_training():
     assert str(CONNECTOR_ID) in connector_update
 
 
-def test_start_job_does_not_touch_the_connector_when_the_insert_fails():
-    session = MagicMock()
+def test_start_job_does_not_touch_the_connector_when_the_insert_fails(database):
+    session = database()
     session.execute.side_effect = IntegrityError("insert", {}, Exception("idx_jobs_single_running"))
 
     with pytest.raises(IntegrityError):
-        runs.start_job(session, CONNECTOR_ID)
+        runs.start_job(CONNECTOR_ID)
 
     assert session.execute.call_count == 1
 
 
-def test_the_message_is_read_and_replaced():
-    session = MagicMock()
+def test_the_message_is_read_and_replaced(database):
+    session = database()
     session.scalar.return_value = "Table X has no rows"
 
-    assert runs.read_message(session, 7) == "Table X has no rows"
-    runs.set_message(session, 7, None)
+    assert runs.read_message(7) == "Table X has no rows"
+    runs.set_message(7, None)
 
     assert "message=NULL" in sql(session.execute.call_args.args[0])
 
 
-def test_an_attempt_starts_without_the_message_and_the_result_of_the_one_before():
-    session = MagicMock()
+def test_an_attempt_starts_without_the_message_and_the_result_of_the_one_before(database):
+    session = database()
 
-    runs.start_attempt(session, 7)
+    runs.start_attempt(7)
 
     update = sql(session.execute.call_args.args[0])
     assert "UPDATE jobs SET message=NULL, result=NULL WHERE jobs.seq = 7" in update  # SQL NULL, not JSON null.
 
 
-def test_the_result_that_the_worker_reported_replaces_jobs_result():
-    session = MagicMock()
+def test_the_result_that_the_worker_reported_replaces_jobs_result(database):
+    session = database()
 
-    runs.set_result(session, 7, {"rows_read": 400})
+    runs.set_result(7, {"rows_read": 400})
 
     compiled = session.execute.call_args.args[0].compile(dialect=postgresql.dialect())
     assert str(compiled).startswith("UPDATE jobs SET result=")
@@ -95,11 +119,11 @@ def job_row(connector=True, config=True):
     return (CONNECTOR_ID if connector else None, training_config if config else None)
 
 
-def test_the_training_job_has_what_the_worker_needs_and_not_the_connector():
-    session = MagicMock()
+def test_the_training_job_has_what_the_worker_needs_and_not_the_connector(database):
+    session = database()
     session.execute.return_value.first.return_value = job_row()
 
-    job = runs.read_training_job(session, 7)
+    job = runs.read_training_job(7)
 
     assert (job.job_id, job.connector_id, job.source_table, job.target_column) == (7, CONNECTOR_ID, "SALES.ORDERS", "LATE")
     assert job.input_names == ["REGION", "QUANTITY"] and job.columns == ["REGION", "QUANTITY", "LATE"]
@@ -115,15 +139,15 @@ def test_the_training_job_has_what_the_worker_needs_and_not_the_connector():
         (job_row(config=False), "has no training configuration"),
     ],
 )
-def test_a_missing_job_connector_or_configuration_is_a_permanent_failure(row, message):
-    session = MagicMock()
+def test_a_missing_job_connector_or_configuration_is_a_permanent_failure(row, message, database):
+    session = database()
     session.execute.return_value.first.return_value = row
 
     with pytest.raises(PermanentFailure, match=message):
-        runs.read_training_job(session, 7)
+        runs.read_training_job(7)
 
 
-def test_mark_completed_records_the_forecaster_and_completes_the_job_and_the_connector():
+def test_mark_completed_records_the_forecaster_and_completes_the_job_and_the_connector(database):
     job = Job(
         seq=7,
         connector_id=CONNECTOR_ID,
@@ -135,9 +159,9 @@ def test_mark_completed_records_the_forecaster_and_completes_the_job_and_the_con
         },
     )
     connector = Connector(id=CONNECTOR_ID, status="TRAINING", message="old")
-    session = make_session(job, connector)
+    session = make_session(database, job, connector)
 
-    runs.mark_completed(session, 7, attempts=2)
+    runs.mark_completed(7, attempts=2)
 
     (forecaster,) = [c.args[0] for c in session.add.call_args_list]
     assert isinstance(forecaster, Forecaster)
@@ -151,22 +175,22 @@ def test_mark_completed_records_the_forecaster_and_completes_the_job_and_the_con
     assert connector.last_trained_at == job.finished_at
 
 
-def test_mark_completed_tolerates_a_result_with_missing_keys():
+def test_mark_completed_tolerates_a_result_with_missing_keys(database):
     job = Job(seq=7, connector_id=CONNECTOR_ID, status="RUNNING", result=None)
-    session = make_session(job, Connector(id=CONNECTOR_ID, status="TRAINING"))
+    session = make_session(database, job, Connector(id=CONNECTOR_ID, status="TRAINING"))
 
-    runs.mark_completed(session, 7, attempts=1)
+    runs.mark_completed(7, attempts=1)
 
     assert session.add.call_args.args[0].metrics == {}
     assert job.result == {"attempts": 1}
 
 
-def test_mark_failed_keeps_what_the_worker_reported_and_fails_the_connector():
+def test_mark_failed_keeps_what_the_worker_reported_and_fails_the_connector(database):
     job = Job(seq=7, connector_id=CONNECTOR_ID, status="RUNNING", result={"rows_read": 400})
     connector = Connector(id=CONNECTOR_ID, status="TRAINING", message=None)
-    session = make_session(job, connector)
+    session = make_session(database, job, connector)
 
-    runs.mark_failed(session, 7, "Table X has no rows", attempts=1)
+    runs.mark_failed(7, "Table X has no rows", attempts=1)
 
     assert job.status == "FAILED" and job.message == "Table X has no rows" and job.finished_at is not None
     assert job.result == {"rows_read": 400, "attempts": 1}
@@ -174,11 +198,33 @@ def test_mark_failed_keeps_what_the_worker_reported_and_fails_the_connector():
     session.add.assert_not_called()
 
 
-def test_mark_failed_fails_a_job_whose_connector_was_deleted():
+def test_mark_failed_fails_a_job_whose_connector_was_deleted(database):
     job = Job(seq=7, connector_id=None, status="RUNNING", result=None)
-    session = make_session(job)
+    session = make_session(database, job)
 
-    runs.mark_failed(session, 7, "The connector of job 7 does not exist", attempts=1)
+    runs.mark_failed(7, "The connector of job 7 does not exist", attempts=1)
 
     assert job.status == "FAILED"
     session.get.assert_called_once_with(Job, 7)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: runs.start_job(CONNECTOR_ID),
+        lambda: runs.start_attempt(7),
+        lambda: runs.read_message(7),
+        lambda: runs.set_message(7, "m"),
+        lambda: runs.set_result(7, {}),
+        lambda: runs.mark_completed(7, attempts=1),
+        lambda: runs.mark_failed(7, "m", attempts=1),
+    ],
+    ids=["start_job", "start_attempt", "read_message", "set_message", "set_result", "mark_completed", "mark_failed"],
+)
+def test_every_function_runs_in_one_transaction_of_its_own(database, call):
+    """The orchestrator calls them from threads, so none may depend on a session that the caller holds."""
+    make_session(database, Job(seq=7, connector_id=CONNECTOR_ID, status="RUNNING"), Connector(id=CONNECTOR_ID))
+
+    call()
+
+    assert len(database.opened) == 1

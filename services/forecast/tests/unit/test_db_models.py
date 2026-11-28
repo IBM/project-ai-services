@@ -94,6 +94,30 @@ def test_check_constraint_names_match_the_schema_file():
     assert model_checks == set(re.findall(r"CONSTRAINT (chk_\w+) CHECK", SCHEMA))
 
 
+@pytest.mark.parametrize(
+    "constraint, status",
+    [("chk_connectors_status", models.ConnectorStatus), ("chk_jobs_status", models.JobStatus)],
+)
+def test_status_enums_hold_exactly_the_values_the_schema_and_the_models_allow(constraint, status):
+    """An enum that drifts from a CHECK constraint would write a value that the database refuses."""
+    schema_check = re.search(rf"CONSTRAINT {constraint} CHECK \(status IN \(([^)]*)\)\)", SCHEMA).group(1)
+    model_check = next(
+        str(c.sqltext)
+        for table in TABLES.values()
+        for c in table.constraints
+        if isinstance(c, CheckConstraint) and c.name == constraint
+    )
+    values = {member.value for member in status}
+    assert values == set(re.findall(r"'(\w+)'", schema_check))
+    assert values == set(re.findall(r"'(\w+)'", model_check))
+
+
+def test_a_status_member_is_the_string_the_database_stores():
+    """The columns are TEXT: a member compares and formats as its value, so a row read back equals a member."""
+    assert models.JobStatus.RUNNING == "RUNNING"
+    assert f"{models.ConnectorStatus.TRAINED}" == "TRAINED"
+
+
 def test_index_names_match_the_schema_file():
     model_indexes = {index.name for table in TABLES.values() for index in table.indexes}
     assert model_indexes == set(re.findall(r"CREATE (?:UNIQUE )?INDEX IF NOT EXISTS (\w+)", SCHEMA))

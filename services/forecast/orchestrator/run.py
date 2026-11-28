@@ -11,9 +11,10 @@ with the code for a failure that would only repeat. Each attempt starts from an 
 directory, so a retry reads the source again.
 
 Only after a successful attempt does the API publish the model directory to the repository volume,
-load it into Triton and record it in ``forecasters``. These steps run once and are not retried. The
-job ends COMPLETED or FAILED, and an unexpected error ends it FAILED too, so a RUNNING row never
-blocks later trainings.
+load it into Triton and record it in ``forecasters``. The publish and the record run once. The load is
+retried on its own, with the same number of tries and the same wait as the attempts, because a failed
+load must not train the model again. The job ends COMPLETED or FAILED, and an unexpected error ends it
+FAILED too, so a RUNNING row never blocks later trainings.
 
 The data loader writes its own failure message to jobs.message. The training worker has no database
 access: the API tells it what to train in ``job.json`` and, after it ends, copies what it reported in
@@ -28,13 +29,12 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional
 
 from sqlalchemy.exc import IntegrityError
 
 from common.misc_utils import get_logger
 from forecast.db import runs
-from forecast.db.connection import get_db_session
 from forecast.errors import EXIT_PERMANENT, PermanentFailure
 from forecast.orchestrator.process import ProcessResult, run_process
 from forecast.orchestrator.publish import publish
@@ -58,6 +58,9 @@ _NOT_FOR_THE_WORKER = ("POSTGRES_", "DB_")
 
 _MAX_MESSAGE_CHARS = job_files.MAX_MESSAGE_CHARS
 _UNEXPECTED_FAILURE = "The training run failed with an unexpected {name}. The details are in the log."
+# What a RUNNING job says once its data is read, until the job ends: a failure replaces it, the end of the
+# job and the start of the next attempt clear it.
+_TRAINING = "Data loaded. Training the model."
 
 # Named here so that a test can replace the wait between attempts without touching asyncio.
 _sleep = asyncio.sleep
@@ -73,16 +76,6 @@ class AttemptFailure:
 
     message: str
     permanent: bool
-
-
-async def _db(function: Callable[..., Any], *args) -> Any:
-    """Run ``function(session, *args)`` in a thread, in one transaction, so the event loop is not blocked."""
-
-    def call():
-        with get_db_session() as session:
-            return function(session, *args)
-
-    return await asyncio.to_thread(call)
 
 
 def _worker_env() -> dict[str, str]:
@@ -122,7 +115,7 @@ async def _failed(
     permanent = result.exit_code == EXIT_PERMANENT and stopped is None
     left = None if stopped else await reported()
     message = stopped or left or f"The {who} exited with code {result.exit_code}."
-    await _db(runs.set_message, job_id, message)
+    await asyncio.to_thread(runs.set_message, job_id, message)
     return AttemptFailure(message, permanent)
 
 
@@ -132,7 +125,8 @@ async def _attempt(job_id: int) -> Optional[AttemptFailure]:
     scratch = _scratch(job_id)
     shutil.rmtree(scratch, ignore_errors=True)
     scratch.mkdir(mode=0o755, parents=True)
-    await _db(runs.start_attempt, job_id)  # The message and the result of the attempt before must not outlive it.
+    # The message and the result of the attempt before must not outlive it.
+    await asyncio.to_thread(runs.start_attempt, job_id)
 
     data, model = scratch / "data.parquet", scratch / "model"
     loader_limit = config.connector_connect_timeout_s + config.connector_query_timeout_s + LOADER_GRACE_S
@@ -142,14 +136,19 @@ async def _attempt(job_id: int) -> Optional[AttemptFailure]:
         timeout_s=loader_limit,
     )
     if not loader.ok:
-        return await _failed(job_id, "data loader", loader, loader_limit, lambda: _db(runs.read_message, job_id))
+        return await _failed(
+            job_id, "data loader", loader, loader_limit, lambda: asyncio.to_thread(runs.read_message, job_id)
+        )
 
     try:
-        job = await _db(runs.read_training_job, job_id)  # The job or its connector may be gone by now.
+        # The job or its connector may be gone by now.
+        job = await asyncio.to_thread(runs.read_training_job, job_id)
     except PermanentFailure as exc:
-        await _db(runs.set_message, job_id, str(exc))
+        await asyncio.to_thread(runs.set_message, job_id, str(exc))
         return AttemptFailure(str(exc), permanent=True)
     job_file = await asyncio.to_thread(job_files.write_job, scratch, job)
+    # The loader is done: say what the job is doing now.
+    await asyncio.to_thread(runs.set_message, job_id, _TRAINING)
 
     worker_limit = config.default_time_limit_seconds + WORKER_GRACE_S
     worker = await run_process(
@@ -163,7 +162,7 @@ async def _attempt(job_id: int) -> Optional[AttemptFailure]:
     # The files are read once the process is gone, so nothing is written to them any more.
     result = await asyncio.to_thread(job_files.read_result, scratch)
     if result:
-        await _db(runs.set_result, job_id, result)
+        await asyncio.to_thread(runs.set_result, job_id, result)
     elif worker.ok:
         # The job still completes, but without metrics: say so, because nothing else shows it.
         logger.warning("Job %s: the training worker exited 0 but left no usable %s", job_id, job_files.RESULT_FILE)
@@ -191,12 +190,42 @@ async def _attempts(job_id: int) -> tuple[int, Optional[AttemptFailure]]:
         await _sleep(config.training_retry_delay_seconds)
 
 
-async def _publish_and_load(connector_id: str, job_id: int, attempts: int) -> None:
-    """Publish the worker's model directory, load it into Triton and record it. Runs once.
+async def _load_with_retries(name: str, job_id: int) -> None:
+    """Load the published forecaster into Triton, again after TRAINING_RETRY_DELAY_SECONDS when it fails.
 
-    A published directory that Triton does not load, or that cannot be recorded, is removed again, after
-    a best-effort unload so that Triton does not keep serving a forecaster that has no record. A load
-    that failed or timed out on the client may still have completed in Triton, hence the unload there too.
+    At most TRAINING_MAX_ATTEMPTS loads in total. Only the load is repeated, not the training, which is
+    already done. A load that failed or timed out on the client may still have completed in Triton, so
+    it is unloaded before the next one.
+
+    Raises:
+        TritonLoadError: the last load failed.
+    """
+    config = settings.forecast
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            await load_model(name)
+            return
+        except TritonLoadError as exc:
+            if attempt >= config.training_max_attempts:
+                raise
+            logger.warning(
+                "Job %s load %s of %s failed: %s Retrying in %s s",
+                job_id, attempt, config.training_max_attempts, exc, config.training_retry_delay_seconds,
+            )
+            await unload_model(name)
+            await _sleep(config.training_retry_delay_seconds)
+
+
+async def _publish_and_load(connector_id: str, job_id: int, attempts: int) -> None:
+    """Publish the worker's model directory, load it into Triton and record it.
+
+    The publish and the record are made once. The load is retried (``_load_with_retries``), without
+    training again. A published directory that Triton does not load, or that cannot be recorded, is
+    removed again, after a best-effort unload so that Triton does not keep serving a forecaster that has
+    no record. A load that failed or timed out on the client may still have completed in Triton, hence
+    the unload there too.
 
     Raises:
         TritonLoadError: Triton could not load the forecaster.
@@ -206,10 +235,10 @@ async def _publish_and_load(connector_id: str, job_id: int, attempts: int) -> No
         publish, settings.forecast.model_repo_path, job_id, name, _scratch(job_id) / "model"
     )
     try:
-        await load_model(name)
+        await _load_with_retries(name, job_id)
         # A cancel here cannot stop the thread that writes the row: it may still commit it after the
         # handler below has taken the forecaster away. Boot reconciliation (Story 10) removes such a row.
-        await _db(runs.mark_completed, job_id, attempts)
+        await asyncio.to_thread(runs.mark_completed, job_id, attempts)
     except BaseException:
         try:
             await unload_model(name)
@@ -221,7 +250,7 @@ async def _publish_and_load(connector_id: str, job_id: int, attempts: int) -> No
 
 async def _fail(job_id: int, message: str, attempts: int) -> None:
     try:
-        await _db(runs.mark_failed, job_id, message[:_MAX_MESSAGE_CHARS], attempts)
+        await asyncio.to_thread(runs.mark_failed, job_id, message[:_MAX_MESSAGE_CHARS], attempts)
     except Exception:
         # The database is down. The job stays RUNNING until the boot recovery fails it.
         logger.exception("Could not mark job %s FAILED", job_id)
@@ -238,7 +267,7 @@ async def run_training(connector_id: str) -> None:
         return
     async with _lock:
         try:
-            job_id = await _db(runs.start_job, connector_id)
+            job_id = await asyncio.to_thread(runs.start_job, connector_id)
         except IntegrityError as exc:
             if _SINGLE_RUNNING_INDEX in str(exc.orig):
                 logger.warning("Training of connector %s skipped: another job is RUNNING", connector_id)
@@ -258,6 +287,9 @@ async def run_training(connector_id: str) -> None:
                 logger.error("Job %s failed after %s attempt(s): %s", job_id, attempts, failure.message)
                 await _fail(job_id, failure.message, attempts)
                 return
+            # Not part of _attempts: the model is trained by now. A retry because Triton did not load it
+            # would train it again, the longest step, to repeat a step that did not fail. So the load is
+            # retried on its own (_load_with_retries), and a failed publish, load or record fails the job.
             await _publish_and_load(connector_id, job_id, attempts)
             logger.info("Job %s completed after %s attempt(s)", job_id, attempts)
         except TritonLoadError as exc:

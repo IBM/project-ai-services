@@ -80,13 +80,13 @@ class ForecastConfig(BaseSettings):
     training_max_attempts: int = Field(
         default=2,
         ge=1,
-        description="Attempts per job (loader, then worker), the first one included",
+        description="Attempts per job (loader, then worker) and loads into Triton, the first one included",
     )
 
     training_retry_delay_seconds: int = Field(
         default=60,
         ge=0,
-        description="Wait between two attempts of the same job",
+        description="Wait between two attempts of the same job, and between two loads into Triton",
     )
 
     max_queued_jobs: int = Field(
@@ -135,6 +135,10 @@ class ForecastConfig(BaseSettings):
     # 2048 MB is the value measured on the ppc64le target. The worker's memory grows with the table
     # and the design sets no row limit, so a table that needs more fails once it passes the cap.
     # It must stay below the container's memory limit. An empty WORKER_MEMORY_LIMIT_MB removes the cap.
+    # The cap is there although only one training runs at a time: the worker is a child of the API in
+    # the same container, so without it a training that outgrows the container is killed by the
+    # container's out-of-memory kill, which takes the API down too. With it, only the worker is stopped
+    # and the job fails with a message.
     # The API enforces it with a watchdog on the resident memory of the worker's process group
     # (orchestrator/process.py), because no cgroup can be created inside the container. The worker also
     # logs its peak memory ("peak memory MB", training/main.py).
