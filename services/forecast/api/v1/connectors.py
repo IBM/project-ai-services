@@ -3,9 +3,10 @@ Connector REST API endpoints.
 
 Mounted at /v1/connectors by app.py. Only one connector is supported in this
 release, and a connector that exists blocks a new one whatever its status: POST
-answers 409 and stores nothing. A new connector whose secrets cannot be encrypted
-(no usable DB_ENCRYPTION_KEY) is answered with 201 and stored as FAILED, with the
-reason in its message.
+answers 409 and stores nothing. A new connector that cannot be accepted is answered
+with 201 and stored as FAILED, with the reason in its message: its TLS settings are
+invalid (both a certificate and allow_insecure_connection, or neither), or its secrets
+cannot be encrypted (no usable DB_ENCRYPTION_KEY).
 
 Endpoints:
   POST   /v1/connectors
@@ -45,6 +46,7 @@ from forecast.utils.api_utils import (
     list_item,
     merge_connection_details,
     sqlstate,
+    validate_tls_settings,
     training_summary,
 )
 from forecast.utils.encryption import EncryptionKeyError, encrypt_secrets, safe_connection_details
@@ -68,8 +70,10 @@ logger = get_logger("forecast_connectors")
         "Stores the connector with its encrypted secrets and the service settings, and "
         "queues the first training job. Only one connector is supported in this release: "
         "when a connector exists, whatever its status, the call is answered with 409. "
-        "Without a usable DB_ENCRYPTION_KEY the call is answered with 201 and the connector "
-        "is stored with the status FAILED and the reason in its message."
+        "When the connector cannot be accepted, the call is answered with 201 and the "
+        "connector is stored with the status FAILED and the reason in its message: the "
+        "TLS settings are invalid (a certificate and allow_insecure_connection both set, "
+        "or neither), or there is no usable DB_ENCRYPTION_KEY."
     ),
     response_description="Connector created",
 )
@@ -88,24 +92,32 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
             logger.warning(f"Create of connector {connector_id} rejected: a connector already exists")
             APIError.raise_error(ErrorCode.RESOURCE_CONFLICT, CONNECTOR_EXISTS_MESSAGE)
         else:
-            # Without a usable key the secrets cannot be stored. The request is still answered with 201: the
-            # connector is stored as FAILED, without its secrets, and the message tells why. A connector
-            # that already exists is checked first, so it is answered with 409 whatever the key.
-            try:
-                encrypted = encrypt_secrets(details)
-            except EncryptionKeyError as exc:
-                logger.error(f"Connector {connector_id} cannot be accepted: {exc}")
+            # A connector that cannot be accepted is still answered with 201: it is stored as FAILED,
+            # without its secrets, and the message tells why. That is the case when its TLS settings
+            # are invalid, and when there is no usable key to encrypt the secrets. A connector that
+            # already exists is checked first, so it is answered with 409 whatever the reason. The
+            # TLS settings are checked before the key, because they are the caller's to correct.
+            failure = validate_tls_settings(details)
+            encrypted: dict = {}
+            if failure is None:
+                try:
+                    encrypted = encrypt_secrets(details)
+                except EncryptionKeyError as exc:
+                    failure = str(exc)
+
+            if failure is None:
+                _insert_accepted(session, body, connector_id, encrypted)
+                accepted = True  # Only an accepted connector gets a scheduled training.
+            else:
+                logger.error(f"Connector {connector_id} cannot be accepted: {failure}")
                 connectors_db.insert_failed_connector(
                     session,
                     connector_id=connector_id,
                     name=body.name,
                     connector_type=body.type,
                     config=safe_connection_details(details),
-                    message=str(exc),
+                    message=failure,
                 )
-            else:
-                _insert_accepted(session, body, connector_id, encrypted)
-                accepted = True  # Only an accepted connector gets a scheduled training.
 
     if not accepted:
         return ConnectorCreateResponse(id=connector_id)

@@ -34,7 +34,7 @@ class Db2ForIDetails(BaseModel):
     """connection_details of a db2_for_i connector. Unknown fields are rejected.
 
     certificate is the PEM certificate the server's TLS certificate is verified against.
-    With ignore_secure_connection true the server's certificate is not verified.
+    With allow_insecure_connection true the server's certificate is not verified.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -44,7 +44,7 @@ class Db2ForIDetails(BaseModel):
     database: str = Field(min_length=1, max_length=128)
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=1024)
-    ignore_secure_connection: StrictBool = False
+    allow_insecure_connection: StrictBool = False
     certificate: Optional[str] = Field(default=None, max_length=_MAX_CERTIFICATE_LENGTH)
 
     @field_validator("certificate")
@@ -70,7 +70,7 @@ class Db2ForIDetailsPatch(BaseModel):
     database: Any = None
     username: Any = None
     password: Any = None
-    ignore_secure_connection: Any = None
+    allow_insecure_connection: Any = None
     certificate: Any = None
 
 

@@ -32,7 +32,31 @@ UNIQUE_VIOLATION = "23505"
 
 # The stored password is only ever used with these values; changing one needs a new password.
 # The certificate is not listed: a supplied certificate always needs a new password (see below).
-PASSWORD_BOUND_FIELDS = ("host", "port", "database", "username", "ignore_secure_connection")
+PASSWORD_BOUND_FIELDS = ("host", "port", "database", "username", "allow_insecure_connection")
+
+TLS_BOTH_MESSAGE = (
+    "Invalid TLS settings: the connector sets allow_insecure_connection and also has a "
+    "certificate. Provide only one of them."
+)
+TLS_NEITHER_MESSAGE = (
+    "Invalid TLS settings: the connector has no certificate and allow_insecure_connection is "
+    "not set. Provide one of them."
+)
+
+
+def validate_tls_settings(details: dict) -> Optional[str]:
+    """Return why the TLS settings of new connection details are invalid, or None when they are valid.
+
+    Exactly one of a certificate and allow_insecure_connection must be chosen. ``details`` come
+    from the validated request, with the fields that were not sent left out.
+    """
+    has_certificate = details.get("certificate") is not None
+    ignores_verification = details.get("allow_insecure_connection", False) is True
+    if has_certificate and ignores_verification:
+        return TLS_BOTH_MESSAGE
+    if not has_certificate and not ignores_verification:
+        return TLS_NEITHER_MESSAGE
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +179,8 @@ def merge_connection_details(cid: str, config: dict, supplied: dict) -> dict:
     """Validate the stored details merged with the supplied ones; return the supplied fields encrypted.
 
     Raises INVALID_REQUEST when a kept secret cannot be decrypted, the merged details
-    are invalid, or the host, port, database, username or ignore_secure_connection
+    are invalid (both a certificate and allow_insecure_connection, or neither, included),
+    or the host, port, database, username or allow_insecure_connection
     changes, or a certificate is supplied, without a new password.
     Raises INTERNAL_SERVER_ERROR when DB_ENCRYPTION_KEY is missing or invalid, because the
     service starts without it and secrets can then be neither read nor written.
@@ -192,12 +217,19 @@ def merge_connection_details(cid: str, config: dict, supplied: dict) -> dict:
             f"Invalid connection_details: {problems}",
         )
 
+    # A working connector must not be turned into one that cannot connect: refuse the update
+    # and change nothing. (POST stores such a connector as FAILED, but a PUT cannot repair that.)
+    tls_problem = validate_tls_settings(merged.model_dump())
+    if tls_problem:
+        logger.warning(f"Update of connector {cid} rejected: {tls_problem}")
+        APIError.raise_error(ErrorCode.INVALID_REQUEST, tls_problem)
+
     # Security check: never replay a stored password to a changed target, identity or TLS trust.
-    # A stored connector that predates ignore_secure_connection has it unset, which means false.
+    # A stored connector that predates allow_insecure_connection has it unset, which means false.
     changed = [
         f
         for f in PASSWORD_BOUND_FIELDS
-        if getattr(merged, f) != config.get(f, False if f == "ignore_secure_connection" else None)
+        if getattr(merged, f) != config.get(f, False if f == "allow_insecure_connection" else None)
     ]
     if "certificate" in supplied:
         changed.append("certificate")
@@ -209,7 +241,7 @@ def merge_connection_details(cid: str, config: dict, supplied: dict) -> dict:
         APIError.raise_error(
             ErrorCode.INVALID_REQUEST,
             "Password must be supplied when host, port, database, username, "
-            "ignore_secure_connection or certificate changes.",
+            "allow_insecure_connection or certificate changes.",
         )
 
     # Store the validated values, so "8471" is kept as the integer 8471.
