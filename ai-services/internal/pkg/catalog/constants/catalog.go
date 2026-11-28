@@ -102,6 +102,8 @@ const (
 	DatasourceProviderObjectStorage = "object_storage"
 	// DatasourceProviderFileSystem is the provider ID for SSH/SFTP file system connectors.
 	DatasourceProviderFileSystem = "file_system"
+	// DatasourceProviderDb2ForI is the provider ID for IBM Db2 for i connectors accessed through Mapepire.
+	DatasourceProviderDb2ForI = "db2_for_i"
 )
 
 // Catalog name constants.

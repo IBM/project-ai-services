@@ -83,6 +83,7 @@ func newConnectorSyncJob(ctx context.Context, connectorRepo repository.Connector
 		map[string]datasourceservice.ConnectionTester{
 			constants.DatasourceProviderObjectStorage: datasourceservice.NewObjectStorageTester(),
 			constants.DatasourceProviderFileSystem:    datasourceservice.NewFileSystemTester(),
+			constants.DatasourceProviderDb2ForI:       datasourceservice.NewDb2ForITester(),
 		},
 		encryptionKey,
 		connectorsync.DefaultConnectorSyncInterval,

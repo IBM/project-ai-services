@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "host",
+    "database",
+    "username",
+    "password"
+  ],
+  "properties": {
+    "host": {
+      "type": "string",
+      "title": "Hostname",
+      "description": "Hostname or IP address of the IBM i system running the Mapepire server.",
+      "minLength": 1,
+      "ui:section": "Location"
+    },
+    "port": {
+      "type": "integer",
+      "title": "Port",
+      "description": "Port of the Mapepire server. Defaults to 8076 when not supplied.",
+      "minimum": 1,
+      "maximum": 65535,
+      "ui:section": "Location"
+    },
+    "database": {
+      "type": "string",
+      "title": "Database name",
+      "description": "Name of the Db2 for i database (schema or library) to read data from. The account must be authorized to access it.",
+      "minLength": 1,
+      "ui:section": "Location"
+    },
+    "username": {
+      "type": "string",
+      "title": "Username",
+      "description": "Use a read-only account. This platform reads data and never writes to the database. For added protection, use a dedicated account with read only access.",
+      "minLength": 1,
+      "ui:section": "Authentication"
+    },
+    "password": {
+      "type": "string",
+      "title": "Password",
+      "description": "Password of the account.",
+      "format": "password",
+      "minLength": 1,
+      "ui:section": "Authentication"
+    },
+    "allow_insecure_connection": {
+      "type": "boolean",
+      "title": "Allow insecure connection",
+      "description": "Allow connection without verifying the server TLS certificate.",
+      "default": false,
+      "ui:section": "Authentication",
+      "x-ui-controls": "certificate"
+    },
+    "certificate": {
+      "type": "string",
+      "title": "Certificate",
+      "format": "password",
+      "description": "Optional PEM-encoded certificate for TLS authentication and verification.",
+      "ui:section": "Authentication",
+      "x-ui-controlled-by": "allow_insecure_connection",
+      "x-ui-hide-when-checked": true
+    }
+  }
+}

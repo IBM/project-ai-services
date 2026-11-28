@@ -1,0 +1,9 @@
+# Connector identification
+type: connector
+id: db2_for_i
+name: "IBM Db2 for i"
+description: "Secure web socket connection to Db2 for i using Mapepire"
+
+# Connector type this provider belongs to
+connector_type: datasource
+connector_name: "Data sources"

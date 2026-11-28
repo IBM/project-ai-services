@@ -75,6 +75,7 @@ func NewDatasourceService(
 		testers: map[string]ConnectionTester{
 			catalogconstants.DatasourceProviderObjectStorage: NewObjectStorageTester(),
 			catalogconstants.DatasourceProviderFileSystem:    NewFileSystemTester(),
+			catalogconstants.DatasourceProviderDb2ForI:       NewDb2ForITester(),
 		},
 	}
 }
