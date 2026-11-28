@@ -9,7 +9,7 @@ export type {
 } from "@/types/api.types";
 
 /** Internal form values keyed by param name */
-export type FormValues = Record<string, string | string[]>;
+export type FormValues = Record<string, string | string[] | boolean>;
 
 export interface AddDataSourceModalProps {
   open: boolean;
@@ -40,6 +40,7 @@ export const ACTION_TYPES = {
   SET_FORM_VALUES: "SET_FORM_VALUES",
   SET_TEXT_VALUE: "SET_TEXT_VALUE",
   TOGGLE_CHECKBOX_VALUE: "TOGGLE_CHECKBOX_VALUE",
+  SET_BOOLEAN_VALUE: "SET_BOOLEAN_VALUE",
   SET_FIELD_ERRORS: "SET_FIELD_ERRORS",
   CLEAR_SUBMIT_ERROR: "CLEAR_SUBMIT_ERROR",
   SUBMIT_START: "SUBMIT_START",
@@ -63,6 +64,16 @@ export type AddDataSourceModalAction =
   | {
       type: typeof ACTION_TYPES.TOGGLE_CHECKBOX_VALUE;
       payload: { key: string; option: string; sectionTitle: string };
+    }
+  | {
+      type: typeof ACTION_TYPES.SET_BOOLEAN_VALUE;
+      payload: {
+        key: string;
+        value: boolean;
+        sectionTitle: string;
+        /** Fields controlled by this checkbox; their errors are cleared */
+        controlledKeys: string[];
+      };
     }
   | {
       type: typeof ACTION_TYPES.SET_FIELD_ERRORS;
@@ -148,6 +159,23 @@ export const addDataSourceModalReducer = (
       return {
         ...state,
         formValues: { ...state.formValues, [action.payload.key]: next },
+        fieldErrors: nextFieldErrors,
+        sectionErrors: nextSectionErrors,
+      };
+    }
+    case ACTION_TYPES.SET_BOOLEAN_VALUE: {
+      const nextFieldErrors = { ...state.fieldErrors };
+      for (const key of action.payload.controlledKeys) {
+        delete nextFieldErrors[key];
+      }
+      const nextSectionErrors = { ...state.sectionErrors };
+      delete nextSectionErrors[action.payload.sectionTitle];
+      return {
+        ...state,
+        formValues: {
+          ...state.formValues,
+          [action.payload.key]: action.payload.value,
+        },
         fieldErrors: nextFieldErrors,
         sectionErrors: nextSectionErrors,
       };

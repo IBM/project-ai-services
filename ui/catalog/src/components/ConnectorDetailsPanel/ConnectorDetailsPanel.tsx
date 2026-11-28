@@ -2,6 +2,7 @@ import React, { useReducer, useEffect, useCallback, useMemo } from "react";
 import { SidePanel } from "@carbon/ibm-products";
 import {
   Button,
+  Checkbox,
   Link,
   PasswordInput,
   TextInput,
@@ -39,8 +40,11 @@ import {
   parseConnectorSchema,
   groupFieldsBySections,
   buildInitialValues,
+  isFieldHidden,
+  isRequiredWhenVisible,
 } from "@/components/AddDataSourceModal/schemaUtils";
 import type { ConnectorField } from "@/components/AddDataSourceModal/schemaUtils";
+import type { UpdateDataSourceAuthRequest } from "@/types/api.types";
 import ConnectorFieldLabel from "@/components/AddDataSourceModal/ConnectorFieldLabel";
 import { normalizePrivateKey } from "@/components/AddDataSourceModal/datasourceTransform";
 import { calculateUptime } from "@/utils/time";
@@ -137,6 +141,20 @@ const ConnectorDetailsPanel = ({
     [sectionedFields],
   );
 
+  // Blank form values; checkbox fields start from the stored value when the
+  // backend returns it in the connector metadata.
+  const detailMetadata = state.detail?.metadata;
+  const buildAuthInitialValues = useCallback(() => {
+    const values = buildInitialValues(authFields);
+    for (const field of authFields) {
+      const stored = detailMetadata?.[field.key];
+      if (field.type === "checkbox" && typeof stored === "boolean") {
+        values[field.key] = stored;
+      }
+    }
+    return values;
+  }, [authFields, detailMetadata]);
+
   // ── Honour mode prop once detail + fields are ready ───────────────────────
   useEffect(() => {
     if (!state.detail?.id || authFields.length === 0) return;
@@ -144,11 +162,11 @@ const ConnectorDetailsPanel = ({
     if (mode === "update-key") {
       dispatch({
         type: PANEL_ACTION_TYPES.SHOW_AUTH_FORM,
-        payload: buildInitialValues(authFields) as Record<string, string>,
+        payload: buildAuthInitialValues(),
       });
     }
     // "view" mode: INITIAL_PANEL_STATE already shows the button
-  }, [state.detail?.id, authFields, mode]);
+  }, [state.detail?.id, authFields, mode, buildAuthInitialValues]);
 
   // ── Success auto-dismiss ───────────────────────────────────────────────────
   useEffect(() => {
@@ -169,16 +187,25 @@ const ConnectorDetailsPanel = ({
     if (!state.detail) return;
     dispatch({
       type: PANEL_ACTION_TYPES.SHOW_AUTH_FORM,
-      payload: buildInitialValues(authFields) as Record<string, string>,
+      payload: buildAuthInitialValues(),
     });
-  }, [state.detail, authFields]);
+  }, [state.detail, buildAuthInitialValues]);
 
-  const handleFieldChange = useCallback((key: string, value: string) => {
-    dispatch({
-      type: PANEL_ACTION_TYPES.SET_AUTH_FIELD,
-      payload: { key, value },
-    });
-  }, []);
+  const handleFieldChange = useCallback(
+    (key: string, value: string | boolean) => {
+      dispatch({
+        type: PANEL_ACTION_TYPES.SET_AUTH_FIELD,
+        payload: {
+          key,
+          value,
+          controlledKeys: authFields
+            .filter((f) => f.controlledBy === key)
+            .map((f) => f.key),
+        },
+      });
+    },
+    [authFields],
+  );
 
   const handleCancel = useCallback(() => {
     dispatch({ type: PANEL_ACTION_TYPES.HIDE_AUTH_FORM });
@@ -187,11 +214,14 @@ const ConnectorDetailsPanel = ({
   const handleSave = useCallback(async () => {
     if (!connectorId) return;
 
-    // Validate required auth fields
+    // Validate required auth fields (hidden and checkbox fields are skipped)
     const errors: Record<string, string> = {};
     for (const field of authFields) {
-      if (!field.isRequired) continue;
-      const val = (state.authFormValues[field.key] ?? "").trim();
+      if (field.type === "checkbox") continue;
+      if (isFieldHidden(field, state.authFormValues)) continue;
+      if (!isRequiredWhenVisible(field)) continue;
+      const raw = state.authFormValues[field.key];
+      const val = typeof raw === "string" ? raw.trim() : "";
       if (!val) {
         errors[field.key] = `Provide a valid ${field.label.toLowerCase()}`;
       }
@@ -207,10 +237,16 @@ const ConnectorDetailsPanel = ({
     dispatch({ type: PANEL_ACTION_TYPES.SAVE_START });
 
     try {
-      const params: Record<string, string | string[]> = {};
+      const params: UpdateDataSourceAuthRequest["params"] = {};
       for (const field of authFields) {
-        let val = (state.authFormValues[field.key] ?? "").trim();
-        if (field.key === "private_key") {
+        if (isFieldHidden(field, state.authFormValues)) continue;
+        const raw = state.authFormValues[field.key];
+        if (field.type === "checkbox") {
+          params[field.key] = raw === true;
+          continue;
+        }
+        let val = typeof raw === "string" ? raw.trim() : "";
+        if (field.key === "private_key" || field.key === "certificate") {
           val = normalizePrivateKey(val);
         }
         if (val) params[field.key] = val;
@@ -221,6 +257,8 @@ const ConnectorDetailsPanel = ({
       // Mark every auth field as invalid and surface the banner error atomically.
       const fieldErrors: Record<string, string> = {};
       for (const field of authFields) {
+        if (field.type === "checkbox") continue;
+        if (isFieldHidden(field, state.authFormValues)) continue;
         fieldErrors[field.key] = `Provide a valid ${field.label.toLowerCase()}`;
       }
       dispatch({
@@ -257,13 +295,26 @@ const ConnectorDetailsPanel = ({
   const renderAuthField = (field: ConnectorField) => {
     const isSaving = state.authSectionState.kind === "saving";
     const fieldError = state.authFieldErrors[field.key];
-    const value = state.authFormValues[field.key] ?? "";
+    const rawValue = state.authFormValues[field.key];
+    const value = typeof rawValue === "string" ? rawValue : "";
     const id = `connector-auth-${field.key}`;
     const labelNode = (
       <ConnectorFieldLabel text={field.label} description={field.description} />
     );
 
     switch (field.type) {
+      case "checkbox":
+        return (
+          <Checkbox
+            key={field.key}
+            id={id}
+            labelText={labelNode}
+            checked={rawValue === true}
+            disabled={isSaving}
+            onChange={(_, { checked }) => handleFieldChange(field.key, checked)}
+          />
+        );
+
       case "password":
         return (
           <PasswordInput
@@ -294,8 +345,8 @@ const ConnectorDetailsPanel = ({
         );
 
       case "checkboxArray":
-        // Checkbox fields don't appear in the auth section but are handled
-        // here for exhaustiveness — auth section only renders password/text.
+        // Array checkbox fields don't appear in the auth section but are
+        // handled here for exhaustiveness.
         return null;
 
       default: {
@@ -395,7 +446,11 @@ const ConnectorDetailsPanel = ({
         {/* Edit / saving / success / error states — show form fields */}
         {authSectionState.kind !== "button" && (
           <>
-            <Stack gap={5}>{authFields.map(renderAuthField)}</Stack>
+            <Stack gap={5}>
+              {authFields
+                .filter((field) => !isFieldHidden(field, state.authFormValues))
+                .map(renderAuthField)}
+            </Stack>
 
             <Stack
               orientation="horizontal"

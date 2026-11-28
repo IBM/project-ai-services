@@ -1,4 +1,8 @@
-import type { ConnectorField } from "./schemaUtils";
+import {
+  isFieldHidden,
+  isNumericField,
+  type ConnectorField,
+} from "./schemaUtils";
 import type { FormValues, CreateDatasourceRequest } from "./types";
 
 export function normalizePrivateKey(value: string): string {
@@ -29,23 +33,27 @@ export function transformToCreateDatasourcePayload(
   formValues: FormValues,
   fields: ConnectorField[],
 ): CreateDatasourceRequest {
-  const params: Record<string, string | string[]> = {};
+  const params: CreateDatasourceRequest["params"] = {};
 
   for (const field of fields) {
+    if (isFieldHidden(field, formValues)) continue;
+
     const raw = formValues[field.key];
 
-    if (field.type === "checkboxArray") {
+    if (field.type === "checkbox") {
+      params[field.key] = raw === true;
+    } else if (field.type === "checkboxArray") {
       const arr = (raw as string[]) ?? [];
       if (arr.length > 0) {
         params[field.key] = arr;
       }
     } else {
       let str = ((raw as string) ?? "").trim();
-      if (field.key === "private_key") {
+      if (field.key === "private_key" || field.key === "certificate") {
         str = normalizePrivateKey(str);
       }
       if (str !== "") {
-        params[field.key] = str;
+        params[field.key] = isNumericField(field) ? Number(str) : str;
       }
     }
   }

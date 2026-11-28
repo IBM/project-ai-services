@@ -24,6 +24,10 @@ import {
   parseConnectorSchema,
   groupFieldsBySections,
   buildInitialValues,
+  isFieldHidden,
+  isNumericField,
+  isRequiredWhenVisible,
+  getNumberError,
   type ConnectorField,
 } from "./schemaUtils";
 import { transformToCreateDatasourcePayload } from "./datasourceTransform";
@@ -127,6 +131,24 @@ const AddDataSourceModal = ({
     });
   };
 
+  const setBooleanValue = (
+    key: string,
+    value: boolean,
+    sectionTitle: string,
+  ) => {
+    dispatch({
+      type: ACTION_TYPES.SET_BOOLEAN_VALUE,
+      payload: {
+        key,
+        value,
+        sectionTitle,
+        controlledKeys: fields
+          .filter((f) => f.controlledBy === key)
+          .map((f) => f.key),
+      },
+    });
+  };
+
   // ── Derived loading / error states ────────────────────────────────────────
   const paramsLoading = selectedType
     ? isParamsLoading(selectedType.provider.id)
@@ -145,13 +167,21 @@ const AddDataSourceModal = ({
 
     const fieldErrors: Record<string, string> = {};
     for (const field of fields) {
-      if (!field.isRequired) continue;
+      if (field.type === "checkbox") continue;
+      if (isFieldHidden(field, formValues)) continue;
       const val = formValues[field.key];
       const isEmpty =
         field.type === "checkboxArray"
           ? (val as string[]).length === 0
           : !val || !String(val).trim();
-      if (isEmpty) {
+      const numberError =
+        !isEmpty && isNumericField(field)
+          ? getNumberError(field, String(val).trim())
+          : null;
+      if (numberError) {
+        fieldErrors[field.key] = numberError;
+        valid = false;
+      } else if (isRequiredWhenVisible(field) && isEmpty) {
         fieldErrors[field.key] = `Provide a valid ${field.label.toLowerCase()}`;
         valid = false;
       }
@@ -200,6 +230,9 @@ const AddDataSourceModal = ({
     const structuredRe = /at\s+'\/([^']+)':/g;
 
     for (const field of fields) {
+      // A server message must not attach an error to a field the user can't see.
+      if (isFieldHidden(field, formValues)) continue;
+
       let matched = false;
 
       // A: exact key from JSON Schema output — no section restriction needed.
@@ -317,6 +350,20 @@ const AddDataSourceModal = ({
     );
 
     switch (field.type) {
+      case "checkbox":
+        return (
+          <Checkbox
+            key={field.key}
+            id={fieldId}
+            labelText={labelNode}
+            checked={formValues[field.key] === true}
+            disabled={isSubmitting}
+            onChange={(_, { checked }) =>
+              setBooleanValue(field.key, checked, field.sectionTitle)
+            }
+          />
+        );
+
       case "checkboxArray": {
         const options = field.checkboxOptions ?? [];
         const selected = (formValues[field.key] as string[]) ?? [];
@@ -380,6 +427,7 @@ const AddDataSourceModal = ({
             invalid={!!fieldError}
             invalidText={fieldError}
             disabled={isSubmitting}
+            inputMode={isNumericField(field) ? "numeric" : undefined}
             value={(formValues[field.key] as string) ?? ""}
             onChange={(e) =>
               setTextValue(field.key, e.target.value, field.sectionTitle)
@@ -510,13 +558,16 @@ const AddDataSourceModal = ({
           !paramsError &&
           sections.map((section) => {
             const isLocationSection = section.title === "Location";
+            // Optional fields flagged x-ui-always-visible stay inline instead of behind "Add prefix +"
+            const isCollapsibleOptional = (f: ConnectorField) =>
+              f.isOptional && !f.alwaysVisible;
             const visibleFields = isLocationSection
               ? section.fields.filter(
-                  (f) => !f.isOptional || showLocationOptionals,
+                  (f) => !isCollapsibleOptional(f) || showLocationOptionals,
                 )
               : section.fields;
             const hiddenOptionals = isLocationSection
-              ? section.fields.filter((f) => f.isOptional)
+              ? section.fields.filter(isCollapsibleOptional)
               : [];
 
             const sectionError = sectionErrors[section.title];
@@ -550,7 +601,9 @@ const AddDataSourceModal = ({
                   </div>
                 )}
 
-                {visibleFields.map((field) => renderField(field))}
+                {visibleFields
+                  .filter((field) => !isFieldHidden(field, formValues))
+                  .map((field) => renderField(field))}
 
                 {isLocationSection &&
                   hiddenOptionals.length > 0 &&
