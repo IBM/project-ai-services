@@ -19,7 +19,8 @@ Endpoints:
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Response, status
+from fastapi import Depends, APIRouter, Query, Response, status
+from common.auth import require_role
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -63,6 +64,7 @@ logger = get_logger("forecast_connectors")
 
 @router.post(
     "",
+    dependencies=[Depends(require_role("write"))],
     status_code=status.HTTP_201_CREATED,
     response_model=ConnectorCreateResponse,
     summary="Create the connector and queue its first training",
@@ -162,6 +164,7 @@ def _insert_accepted(
 
 @router.get(
     "",
+    dependencies=[Depends(require_role("read"))],
     response_model=ConnectorListResponse,
     responses={500: http_error_responses[500]},
     summary="List connectors",
@@ -193,6 +196,7 @@ def list_connectors(
 
 @router.get(
     "/{connector_id}",
+    dependencies=[Depends(require_role("read"))],
     response_model=ConnectorResponse,
     responses={404: http_error_responses[404], 500: http_error_responses[500]},
     summary="Get a connector",
@@ -231,6 +235,7 @@ def get_connector(connector_id: UUID) -> ConnectorResponse:
 
 @router.put(
     "/{connector_id}",
+    dependencies=[Depends(require_role("write"))],
     status_code=status.HTTP_200_OK,
     responses={
         400: http_error_responses[400],
@@ -295,6 +300,7 @@ def update_connector(
 
 @router.get(
     "/{connector_id}/metrics",
+    dependencies=[Depends(require_role("read"))],
     response_model=ConnectorMetricsResponse,
     responses={404: http_error_responses[404], 500: http_error_responses[500]},
     summary="Connector metrics (developer use only)",

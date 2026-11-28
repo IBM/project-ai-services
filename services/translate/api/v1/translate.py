@@ -16,7 +16,8 @@ import asyncio
 import time
 
 import httpx
-from fastapi import APIRouter, status
+from fastapi import Depends, APIRouter, status
+from common.auth import require_role
 
 from common.error_utils import APIError, ErrorCode, http_error_responses
 from common.llm_utils import tokenize_with_llm
@@ -40,6 +41,7 @@ router = APIRouter()
 
 @router.post(
     "",
+    dependencies=[Depends(require_role("write"))],
     status_code=status.HTTP_200_OK,
     tags=["MCP"],
     response_model=SyncTranslateResponse,

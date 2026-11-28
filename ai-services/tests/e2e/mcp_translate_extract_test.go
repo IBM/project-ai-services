@@ -99,9 +99,23 @@ func mcpRequireTools(mcpURL, label string, want []string) {
 	}
 }
 
+// mcpServiceForTool returns the catalog service behind a tool. The sidecar forwards the caller's
+// token, and the API accepts only a token issued for its own service, so the audience must match.
+// The tool names are generated from the API path (for example ..._v1_extract_jobs_post).
+func mcpServiceForTool(tool string) string {
+	switch {
+	case strings.Contains(tool, "_v1_translate"):
+		return common.ServiceTranslate
+	case strings.Contains(tool, "_v1_extract"):
+		return common.ServiceExtract
+	default:
+		return ""
+	}
+}
+
 // mcpCallRaw invokes a tool and returns content[0].text without inspecting the upstream body.
 func mcpCallRaw(callCtx context.Context, endpoint, tool string, args map[string]any) (string, error) {
-	raw, err := mcpCallTool(callCtx, endpoint, tool, args)
+	raw, err := mcpCallToolAs(callCtx, mcpServiceForTool(tool), endpoint, tool, args)
 	if err != nil {
 		return "", err
 	}

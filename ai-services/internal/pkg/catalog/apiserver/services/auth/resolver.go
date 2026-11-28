@@ -60,9 +60,10 @@ func NewServiceRegistry(defs ...ServiceDef) *ServiceRegistry {
 	return r
 }
 
-// DefaultServiceRegistry returns the services that tokens can be issued for: digitize and
-// the Digital Assistant services chat, similarity and summarize (DA4: the audience is the
-// catalog template ID, so the chat service is "chat", not "chatbot").
+// DefaultServiceRegistry returns the services that tokens can be issued for: digitize, the
+// Digital Assistant services chat, similarity and summarize, and extract, translate and
+// forecast (DA4: the audience is the catalog template ID, so the chat service is "chat",
+// not "chatbot").
 func DefaultServiceRegistry() *ServiceRegistry {
 	roles := []string{RoleAdmin, RoleWrite, RoleRead}
 
@@ -71,6 +72,9 @@ func DefaultServiceRegistry() *ServiceRegistry {
 		ServiceDef{Name: "chat", CatalogID: "chat", Roles: roles},
 		ServiceDef{Name: "similarity", CatalogID: "similarity", Roles: roles},
 		ServiceDef{Name: "summarize", CatalogID: "summarize", Roles: roles},
+		ServiceDef{Name: "extract", CatalogID: "extract", Roles: roles},
+		ServiceDef{Name: "translate", CatalogID: "translate", Roles: roles},
+		ServiceDef{Name: "forecast", CatalogID: "forecast", Roles: roles},
 	)
 }
 

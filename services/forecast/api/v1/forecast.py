@@ -13,7 +13,8 @@ Endpoints:
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Query, status
+from fastapi import Depends, APIRouter, Query, status
+from common.auth import require_role
 from fastapi.concurrency import run_in_threadpool
 
 from common.error_utils import APIError, ErrorCode, http_error_responses
@@ -40,6 +41,7 @@ logger = get_logger("forecast_api")
 
 @router.get(
     "",
+    dependencies=[Depends(require_role("read"))],
     response_model=list[ForecasterItem],
     responses={
         404: http_error_responses[404],
@@ -70,6 +72,7 @@ def list_default_forecasters() -> list[ForecasterItem]:
 
 @router.get(
     "/{connector_id}",
+    dependencies=[Depends(require_role("read"))],
     response_model=list[ForecasterItem],
     responses={
         404: http_error_responses[404],
@@ -102,6 +105,7 @@ def list_connector_forecasters(connector_id: UUID) -> list[ForecasterItem]:
 
 @router.post(
     "",
+    dependencies=[Depends(require_role("write"))],
     status_code=status.HTTP_200_OK,
     response_model=ForecastResponse,
     responses={
@@ -135,6 +139,7 @@ async def forecast_default(
 
 @router.post(
     "/{connector_id}",
+    dependencies=[Depends(require_role("write"))],
     status_code=status.HTTP_200_OK,
     response_model=ForecastResponse,
     responses={

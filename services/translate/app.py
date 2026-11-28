@@ -17,10 +17,12 @@ import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.openapi.docs import get_swagger_ui_html
 from lingua import Language
 
+from common.auth import AuthConfigError, AuthMiddleware, get_verifier, require_role
+from common.auth.openapi import add_bearer_auth_to_openapi
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 from common.error_utils import http_exception_handler
 from common.lang_utils import setup_language_detector
@@ -50,7 +52,15 @@ diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_ha
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events (startup and shutdown)."""
-    filtered_paths = ["/health"]
+    # Fail closed: refuse to start without a complete, safe auth configuration. This runs
+    # before the database is touched. The catalog need not be reachable yet; /ready reports that.
+    try:
+        get_verifier()
+    except AuthConfigError as exc:
+        logger.error(f"❌ Startup aborted, authentication is not configured: {exc}")
+        raise
+
+    filtered_paths = ["/health", "/ready"]
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     logger.info("Translation service starting up...")
 
@@ -173,6 +183,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
     openapi_tags=tags_metadata,
+    # Swagger UI at /docs is public (see AuthMiddleware); "/" below serves it behind auth.
+    docs_url="/docs",
+    swagger_ui_oauth2_redirect_url=None,
+    redoc_url=None,
 )
 
 
@@ -204,11 +218,17 @@ async def add_request_id(request: Request, call_next):
     return response
 
 
+# Added last, so it is the outermost layer: every request is authenticated (deny by
+# default) before any other middleware or route code runs, and before a body is read.
+app.add_middleware(AuthMiddleware)
+add_bearer_auth_to_openapi(app, service="translate")
+
+
 # ------------------------------------------------------------------ #
 # Built-in routes                                                     #
 # ------------------------------------------------------------------ #
 
-@app.get("/", include_in_schema=False)
+@app.get("/", include_in_schema=False, dependencies=[Depends(require_role("admin"))])
 def swagger_root():
     """Expose Swagger UI at the root path (/)."""
     return get_swagger_ui_html(
@@ -227,6 +247,26 @@ def swagger_root():
 async def health_check():
     """Perform a basic health check indicating the service is running."""
     return {"status": "ok"}
+
+
+@app.get(
+    "/ready",
+    status_code=status.HTTP_200_OK,
+    tags=["health"],
+    summary="Readiness check",
+    description="Returns 200 when the service can verify tokens, that is, the JWKS keys are available.",
+)
+async def readiness_check():
+    """Perform a readiness check requiring one JWKS fetch."""
+    try:
+        await get_verifier().jwks.check()
+    except Exception as exc:
+        logger.error(f"Readiness check failed, JWKS is unavailable: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="JWKS is unavailable",
+        )
+    return {"status": "ready"}
 
 
 # ------------------------------------------------------------------ #

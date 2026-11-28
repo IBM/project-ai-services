@@ -19,6 +19,9 @@ const (
 	ServiceDigitize   = "digitize"
 	ServiceSimilarity = "similarity"
 	ServiceSummarize  = "summarize"
+	ServiceExtract    = "extract"
+	ServiceTranslate  = "translate"
+	ServiceForecast   = "forecast"
 )
 
 // ServiceTokenSource issues a service token for one service on behalf of the user who ran

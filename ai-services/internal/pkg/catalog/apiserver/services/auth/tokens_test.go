@@ -285,9 +285,9 @@ func TestIssueServiceToken_SameIDWrongIDPIsForbidden(t *testing.T) {
 	assert.Empty(t, roles)
 }
 
-func TestDefaultServiceRegistry_DigitalAssistantServices(t *testing.T) {
+func TestDefaultServiceRegistry_AllAPIServices(t *testing.T) {
 	reg := auth.DefaultServiceRegistry()
-	assert.Equal(t, []string{"chat", "digitize", "similarity", "summarize"}, reg.Names())
+	assert.Equal(t, []string{"chat", "digitize", "extract", "forecast", "similarity", "summarize", "translate"}, reg.Names())
 
 	for _, name := range reg.Names() {
 		def, ok := reg.Lookup(name)
@@ -302,10 +302,10 @@ func TestDefaultServiceRegistry_DigitalAssistantServices(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestBootstrapAdminResolver_GrantsAdminOnDigitalAssistantServices(t *testing.T) {
+func TestBootstrapAdminResolver_GrantsAdminOnAllAPIServices(t *testing.T) {
 	r := auth.NewBootstrapAdminResolver(adminID, auth.DefaultServiceRegistry())
 
-	for _, svc := range []string{"chat", "similarity", "summarize", "digitize"} {
+	for _, svc := range []string{"chat", "similarity", "summarize", "digitize", "extract", "translate", "forecast"} {
 		roles, err := r.Resolve(context.Background(), auth.Principal{ID: adminID, IDP: auth.IDPLocal}, svc)
 		require.NoError(t, err)
 		assert.Equal(t, []string{auth.RoleAdmin}, roles, svc)

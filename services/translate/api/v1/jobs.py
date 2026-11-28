@@ -12,7 +12,8 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Optional, Union
 
-from fastapi import APIRouter, File, Form, Query, UploadFile, status
+from fastapi import Depends, APIRouter, File, Form, Query, UploadFile, status
+from common.auth import require_role
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from common.error_utils import APIError, ErrorCode, http_error_responses
@@ -89,6 +90,7 @@ def _job_to_state(job) -> JobState:
 
 @router.post(
     "",
+    dependencies=[Depends(require_role("write"))],
     status_code=status.HTTP_202_ACCEPTED,
     tags=["MCP"],
     response_model=JobCreatedResponse,
@@ -240,6 +242,7 @@ async def create_translation_job(
 
 @router.get(
     "",
+    dependencies=[Depends(require_role("read"))],
     response_model=JobsListResponse,
     response_description="Paginated list of jobs matching the query.",
     summary="List translation jobs",
@@ -280,6 +283,7 @@ async def list_jobs(
 
 @router.get(
     "/{job_id}",
+    dependencies=[Depends(require_role("read"))],
     tags=["MCP"],
     response_model=JobDetailResponse,
     response_description="Full job status, phase metadata, and timestamps.",
@@ -307,6 +311,7 @@ async def get_job(job_id: str) -> JobDetailResponse:
 
 @router.get(
     "/{job_id}/result",
+    dependencies=[Depends(require_role("read"))],
     tags=["MCP"],
     response_model=JobResultResponse,
     response_description="Translation result with metadata and token usage.",
@@ -371,6 +376,7 @@ async def get_job_result(job_id: str) -> Union[JobResultResponse, JSONResponse]:
 
 @router.get(
     "/{job_id}/result/download",
+    dependencies=[Depends(require_role("read"))],
     response_class=PlainTextResponse,
     response_description="Translated file stream with Content-Disposition attachment header.",
     summary="Download translated file",

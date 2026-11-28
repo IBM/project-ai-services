@@ -64,7 +64,7 @@ func TestInjectServiceAuthValues_NilValues(t *testing.T) {
 
 // The injector is generic: the audience is the catalog ID of whichever service is deployed.
 func TestInjectServiceAuthValues_DigitalAssistantServices(t *testing.T) {
-	for _, svc := range []string{"chat", "similarity", "summarize"} {
+	for _, svc := range []string{"chat", "similarity", "summarize", "extract", "translate", "forecast"} {
 		for _, rt := range []string{"podman", "openshift"} {
 			values := map[string]any{}
 			InjectServiceAuthValues(svc, values, rt)

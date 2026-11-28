@@ -20,3 +20,10 @@ postgres:
   storage: 5Gi
   # @generate:password
   password: ""
+
+# The catalog addresses (JWKS URL, plaintext hosts) come from the shared "catalog-auth" secret
+# that the catalog creates in the namespace at deploy time.
+authAudience: "forecast"
+# Name of the Secret that holds the catalog CA bundle. Set by the catalog at deploy time when it
+# has one; the PEM itself never passes through values.
+authCatalogCaBundleSecret: ""

@@ -103,6 +103,13 @@ spec:
               value: {{ .Values.llm.maxBatchSize | quote }}
             - name: LOG_LEVEL
               value: "{{ .Values.extract.log_level }}"
+            # AUTH_JWKS_URL and AUTH_JWKS_PLAINTEXT_HOSTS come from the shared catalog-auth secret.
+            - name: AUTH_AUDIENCE
+              value: "{{ .Values.authAudience }}"
+            {{- if .Values.authCatalogCaBundleSecret }}
+            - name: AUTH_CATALOG_CA_BUNDLE
+              value: "/etc/ssl/certs/catalog-ca-bundle.crt"
+            {{- end }}
           {{- if .Values.llm.apiKey }}
             - name: LLM_API_KEY
               valueFrom:
@@ -110,6 +117,9 @@ spec:
                   name: "vllm-instruct-api-key"
                   key: apiKey
           {{- end }}
+          envFrom:
+            - secretRef:
+                name: "catalog-auth"
           ports:
             - containerPort: 9500
               protocol: TCP
@@ -123,7 +133,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 9500
             initialDelaySeconds: 10
             periodSeconds: 30
@@ -139,6 +149,12 @@ spec:
           volumeMounts:
             - mountPath: /var/cache/extract
               name: cache
+            {{- if .Values.authCatalogCaBundleSecret }}
+            - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
+              subPath: ca-bundle.crt
+              name: ca-bundle
+              readOnly: true
+            {{- end }}
         {{- if .Values.mcp.enabled }}
         # No readinessProbe: a pod is only Ready when every container is, so a
         # failing sidecar would pull extract-api out of the Service endpoints
@@ -178,3 +194,8 @@ spec:
         - name: cache
           persistentVolumeClaim:
             claimName: extract-cache
+        {{- if .Values.authCatalogCaBundleSecret }}
+        - name: ca-bundle
+          secret:
+            secretName: {{ .Values.authCatalogCaBundleSecret | quote }}
+        {{- end }}

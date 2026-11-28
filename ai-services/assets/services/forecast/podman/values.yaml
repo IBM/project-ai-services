@@ -14,3 +14,6 @@ postgres:
   username: "postgres"
   # @generate:password
   password: ""
+
+# The catalog addresses come from the shared "catalog-auth" secret created at deploy time.
+authAudience: "forecast"

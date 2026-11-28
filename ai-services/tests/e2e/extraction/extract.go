@@ -43,12 +43,20 @@ func jobResultURL(baseURL, jobID, docID string) string {
 	return fmt.Sprintf("%s/v1/extract/jobs/%s/results/%s", strings.TrimRight(baseURL, "/"), jobID, docID)
 }
 
+// httpCfg returns the HTTP config for the API, which enforces service tokens.
+func httpCfg(timeout time.Duration) common.HTTPClientConfig {
+	cfg := common.HTTPConfigForTimeout(timeout)
+	cfg.Service = common.ServiceExtract
+
+	return cfg
+}
+
 func doGET(ctx context.Context, url string) ([]byte, int, error) {
-	return common.DoGET(ctx, url, common.HTTPConfigForTimeout(getCallTimeout))
+	return common.DoGET(ctx, url, httpCfg(getCallTimeout))
 }
 
 func doPOST(ctx context.Context, url string, body *bytes.Buffer, contentType string) ([]byte, int, error) {
-	return common.DoPOST(ctx, url, body, contentType, common.HTTPConfigForTimeout(postCallTimeout))
+	return common.DoPOST(ctx, url, body, contentType, httpCfg(postCallTimeout))
 }
 
 // ErrorResponse is the error envelope returned by the extract service.
@@ -320,7 +328,7 @@ func CreateJobWithFile(ctx context.Context, baseURL string, req ExtractRequest, 
 
 // GetJobDetail fetches job details from GET /v1/extract/jobs/{job_id}.
 func GetJobDetail(ctx context.Context, baseURL, jobID string) (*JobDetailResponse, error) {
-	return common.GetJSON[JobDetailResponse](ctx, jobURL(baseURL, jobID), common.HTTPConfigForTimeout(getCallTimeout))
+	return common.GetJSON[JobDetailResponse](ctx, jobURL(baseURL, jobID), httpCfg(getCallTimeout))
 }
 
 // WaitForJobCompletion polls GET /v1/extract/jobs/{job_id} until the job reaches a terminal state or timeout.
@@ -334,7 +342,7 @@ func WaitForJobCompletion(ctx context.Context, baseURL, jobID string, timeout ti
 
 // GetJobResult fetches per-document result from GET /v1/extract/jobs/{job_id}/results/{doc_id}.
 func GetJobResult(ctx context.Context, baseURL, jobID, docID string) (*JobResultResponse, error) {
-	return common.GetJSON[JobResultResponse](ctx, jobResultURL(baseURL, jobID, docID), common.HTTPConfigForTimeout(getCallTimeout))
+	return common.GetJSON[JobResultResponse](ctx, jobResultURL(baseURL, jobID, docID), httpCfg(getCallTimeout))
 }
 
 // ListJobs calls GET /v1/extract/jobs with optional filters.
@@ -346,12 +354,12 @@ func ListJobs(ctx context.Context, baseURL string, limit, offset int, status, sc
 		"schema_name": schemaName,
 	})
 
-	return common.GetJSON[JobsListResponse](ctx, listURL, common.HTTPConfigForTimeout(getCallTimeout))
+	return common.GetJSON[JobsListResponse](ctx, listURL, httpCfg(getCallTimeout))
 }
 
 // DeleteJob deletes a single job by ID. Accepts 200 or 204.
 func DeleteJob(ctx context.Context, baseURL, jobID string) error {
-	if err := common.DeleteURL(ctx, jobURL(baseURL, jobID), common.HTTPConfigForTimeout(getCallTimeout)); err != nil {
+	if err := common.DeleteURL(ctx, jobURL(baseURL, jobID), httpCfg(getCallTimeout)); err != nil {
 		return fmt.Errorf("delete job %s: %w", jobID, err)
 	}
 
@@ -362,7 +370,7 @@ func DeleteJob(ctx context.Context, baseURL, jobID string) error {
 
 // DeleteAllJobs deletes all jobs (requires ?confirm=true).
 func DeleteAllJobs(ctx context.Context, baseURL string) error {
-	if err := common.DeleteURL(ctx, jobsURL(baseURL)+"?confirm=true", common.HTTPConfigForTimeout(getCallTimeout)); err != nil {
+	if err := common.DeleteURL(ctx, jobsURL(baseURL)+"?confirm=true", httpCfg(getCallTimeout)); err != nil {
 		return fmt.Errorf("delete all jobs: %w", err)
 	}
 
