@@ -15,7 +15,7 @@ export interface ServiceConfig {
   params: Record<string, unknown>; // Service-level params from schema
 }
 
-export type DeploymentRuntimeType = "podman" | "openshift";
+export type DeploymentRuntimeType = "podman" | "openshift" | "remote";
 
 export interface DeployFormData {
   name: string;

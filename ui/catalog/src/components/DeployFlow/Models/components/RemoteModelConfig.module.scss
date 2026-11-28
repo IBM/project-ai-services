@@ -1,0 +1,32 @@
+@use "carbonTokens" as *;
+
+.remoteConfig {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-06;
+}
+
+// Shared fields use $field-02 (on a card); this section is on the page, so use $field-01. `div` outranks the shared rule.
+div.schemaFields {
+  :global {
+    .cds--text-input,
+    .cds--text-input__field-wrapper input,
+    .cds--text-area {
+      background-color: $field-01 !important;
+    }
+  }
+}
+
+// One column of the two-column schema fields grid
+.providerField {
+  width: calc((100% - #{$spacing-06}) / 2);
+
+  :global {
+    .cds--dropdown,
+    .cds--list-box,
+    .cds--list-box__field {
+      background-color: $field-01 !important;
+      border-bottom: 1px solid $border-strong !important;
+    }
+  }
+}

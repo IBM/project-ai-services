@@ -126,22 +126,26 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
     const isInvalid = hasValidationError && !!fieldError;
     const invalidText = fieldError || `Provide a valid ${field.label}`;
 
-    const labelWithInfo =
-      field.description && field.key === "watsonxProjectId" ? (
-        <div className={styles.labelWithInfo}>
-          <span>{field.label}</span>
-          <Toggletip align="top">
-            <ToggletipButton label="Additional information">
-              <Information />
-            </ToggletipButton>
-            <ToggletipContent>
-              <p>{parseMarkdownLinks(field.description)}</p>
-            </ToggletipContent>
-          </Toggletip>
-        </div>
-      ) : (
-        field.label
-      );
+    // Local watsonx keys it watsonxProjectId, the remote connector schema keys it project_id
+    const infoDescription =
+      field.key === "watsonxProjectId" || field.key === "project_id"
+        ? field.description
+        : undefined;
+    const labelWithInfo = infoDescription ? (
+      <div className={styles.labelWithInfo}>
+        <span>{field.label}</span>
+        <Toggletip align="top">
+          <ToggletipButton label="Additional information">
+            <Information />
+          </ToggletipButton>
+          <ToggletipContent>
+            <p>{parseMarkdownLinks(infoDescription)}</p>
+          </ToggletipContent>
+        </Toggletip>
+      </div>
+    ) : (
+      field.label
+    );
 
     if (field.uiOnly && field.type === "boolean") {
       return (

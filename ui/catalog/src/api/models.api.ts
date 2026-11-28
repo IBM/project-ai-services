@@ -2,9 +2,12 @@ import { api } from "@/api/axios";
 import { MODEL_MANAGEMENT_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import type {
   CatalogModel,
+  CreateModelRequest,
+  CreateModelResponse,
   FetchModelsPageParams,
   CatalogModelDetails,
   GenerateModelKeyResponse,
+  ModelDeployOptions,
   ModelDeployment,
   ModelDeploymentDetail,
   ModelDeploymentsListResponse,
@@ -25,6 +28,18 @@ export async function fetchCatalogModelDetails(
 ): Promise<CatalogModelDetails> {
   const response = await api.get<CatalogModelDetails>(
     MODEL_MANAGEMENT_ENDPOINTS.GET_CATALOG_MODEL_DETAILS(id),
+  );
+  return response.data;
+}
+
+// Fetches the inference backends (providers) and resource profiles available for a model
+export async function fetchModelDeployOptions(
+  modelId: string,
+  runtime?: string,
+): Promise<ModelDeployOptions> {
+  const response = await api.get<ModelDeployOptions>(
+    MODEL_MANAGEMENT_ENDPOINTS.GET_CATALOG_MODEL_DEPLOY_OPTIONS(modelId),
+    { params: runtime ? { runtime } : undefined },
   );
   return response.data;
 }
@@ -100,6 +115,17 @@ export async function fetchAllModels(
   }
 
   return allData;
+}
+
+// Registers a new model deployment
+export async function createModel(
+  payload: CreateModelRequest,
+): Promise<CreateModelResponse> {
+  const response = await api.post<CreateModelResponse>(
+    MODEL_MANAGEMENT_ENDPOINTS.CREATE_MODEL,
+    payload,
+  );
+  return response.data;
 }
 
 // Fetches the detail of a single model deployment by ID

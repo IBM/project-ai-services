@@ -15,7 +15,11 @@ import { formatVersion } from "@/utils/string";
 import styles from "../DeployFlow.shared.module.scss";
 import type { DeployFormData, DeploymentRuntimeType } from "../types";
 import type { WorkerApiResponse } from "@/types/api.types";
-import { WORKER_RUNTIME_LABELS, LOCAL_WORKER_NAME } from "@/constants";
+import {
+  WORKER_RUNTIME_LABELS,
+  LOCAL_WORKER_NAME,
+  REMOTE_RUNTIME,
+} from "@/constants";
 import RegisterWorkerModal from "@/components/WorkerResourcesTable/RegisterWorkerModal";
 import type { RegisterPhase } from "@/components/WorkerResourcesTable/types";
 import { registerWorker } from "@/api/workerResources.api";
@@ -92,8 +96,24 @@ export interface SharedStepOneProps {
   title: string;
   formData: DeployFormData;
   onChange: (updates: Partial<DeployFormData>) => void;
-  version: string;
-  versionLabel: string;
+  // Version dropdown is hidden when version is omitted
+  version?: string;
+  versionLabel?: string;
+  nameLabel?: string;
+  nameInvalidText?: string;
+  // Defaults to "not empty"
+  isNameValid?: (name: string) => boolean;
+  deploymentTypeHeading?: string;
+  // Overrides the default worker-runtime tiles
+  runtimeOptions?: Record<string, { label: string; description: string }>;
+  // Runtime tiles shown grayed out and not selectable
+  disabledRuntimes?: readonly string[];
+  // Worker picker copy
+  locationLabel?: string;
+  locationTooltip?: string;
+  showLocationHeading?: boolean;
+  // Shown instead of the worker picker for remote
+  remoteSection?: React.ReactNode;
   components?: StepOneComponentRow[];
   onComponentChange?: (componentType: string, providerId: string) => void;
   onModelChange?: (componentType: string, model: string) => void;
@@ -105,12 +125,25 @@ export interface SharedStepOneProps {
   refetchWorkers: () => void;
 }
 
+const DEFAULT_LOCATION_TOOLTIP =
+  "A worker is a compute resource — such as a partition, virtual machine, or OpenShift cluster — that runs AI workloads on the platform. If the worker resource you need isn't listed, click the Register worker resource button to connect it to the platform.";
+
 export const SharedStepOne = ({
   title,
   formData,
   onChange,
   version,
-  versionLabel,
+  versionLabel = "Version",
+  nameLabel = "Name",
+  nameInvalidText = "Name is required",
+  isNameValid: isNameValidFn = (name) => !!name.trim(),
+  deploymentTypeHeading = "Deployment type",
+  runtimeOptions = WORKER_RUNTIME_LABELS,
+  disabledRuntimes = [],
+  locationLabel = "Worker resource",
+  locationTooltip = DEFAULT_LOCATION_TOOLTIP,
+  showLocationHeading = true,
+  remoteSection,
   components = [],
   onComponentChange,
   onModelChange,
@@ -121,8 +154,12 @@ export const SharedStepOne = ({
   isLoadingWorkers,
   refetchWorkers,
 }: SharedStepOneProps) => {
-  const isNameValid = !!formData.name.trim();
-  const versionOptions = [{ id: version, text: formatVersion(version) }];
+  const isNameValid = isNameValidFn(formData.name);
+  const versionOptions = version
+    ? [{ id: version, text: formatVersion(version) }]
+    : [];
+  // Remote has no worker
+  const showLocation = formData.deploymentType !== REMOTE_RUNTIME;
 
   const [registerState, dispatchRegister] = useReducer(
     registerReducer,
@@ -244,32 +281,35 @@ export const SharedStepOne = ({
             <div className={styles.formField}>
               <TextInput
                 id="deploy-name"
-                labelText="Name"
+                labelText={nameLabel}
                 value={formData.name}
                 invalid={showNameError && !isNameValid}
-                invalidText="Name is required"
+                invalidText={nameInvalidText}
                 onChange={(e) => onChange({ name: e.target.value })}
               />
             </div>
           </Column>
 
-          <Column sm={4} md={8} lg={16}>
-            <div className={styles.formField}>
-              <Dropdown
-                id="deploy-version"
-                titleText={versionLabel}
-                label="Select version"
-                items={versionOptions}
-                itemToString={(item) => (item ? item.text : "")}
-                selectedItem={
-                  versionOptions.find((v) => v.id === formData.version) || null
-                }
-                onChange={({ selectedItem }) =>
-                  onChange({ version: selectedItem?.id || "" })
-                }
-              />
-            </div>
-          </Column>
+          {version !== undefined && (
+            <Column sm={4} md={8} lg={16}>
+              <div className={styles.formField}>
+                <Dropdown
+                  id="deploy-version"
+                  titleText={versionLabel}
+                  label="Select version"
+                  items={versionOptions}
+                  itemToString={(item) => (item ? item.text : "")}
+                  selectedItem={
+                    versionOptions.find((v) => v.id === formData.version) ||
+                    null
+                  }
+                  onChange={({ selectedItem }) =>
+                    onChange({ version: selectedItem?.id || "" })
+                  }
+                />
+              </div>
+            </Column>
+          )}
 
           {components.map((component) => {
             const labelNode = component.description ? (
@@ -332,18 +372,22 @@ export const SharedStepOne = ({
           })}
 
           <Column sm={4} md={8} lg={16}>
-            <p className={styles.deploymentSectionHeading}>Deployment type</p>
+            <p className={styles.deploymentSectionHeading}>
+              {deploymentTypeHeading}
+            </p>
             <div className={styles.deploymentTypeGrid}>
-              {Object.entries(WORKER_RUNTIME_LABELS).map(
+              {Object.entries(runtimeOptions).map(
                 ([value, { label, description }]) => {
                   const isSelected = formData.deploymentType === value;
+                  const isDisabled = disabledRuntimes.includes(value);
                   return (
                     <ClickableTile
                       key={value}
                       id={`deployment-type-${value}`}
+                      disabled={isDisabled}
                       className={`${styles.deploymentTypeTile} ${
                         isSelected ? styles.deploymentTypeTileSelected : ""
-                      }`}
+                      } ${isDisabled ? styles.deploymentTypeTileDisabled : ""}`}
                       onClick={() => handleDeploymentTypeChange(value)}
                     >
                       {isSelected && (
@@ -364,59 +408,64 @@ export const SharedStepOne = ({
             </div>
           </Column>
 
-          <Column sm={4} md={8} lg={16}>
-            <div className={styles.deploymentLocationField}>
-              <p className={styles.deploymentSectionHeading}>
-                Deployment location
-              </p>
-              <div className={styles.deploymentLocationLabel}>
-                <span>Worker resource</span>
-                <Toggletip align="top">
-                  <ToggletipButton label="Worker resource information">
-                    <Information />
-                  </ToggletipButton>
-                  <ToggletipContent>
-                    <p>
-                      A worker is a compute resource — such as a partition,
-                      virtual machine, or OpenShift cluster — that runs AI
-                      workloads on the platform. If the worker resource you need
-                      isn&apos;t listed, click the Register worker resource
-                      button to connect it to the platform.
-                    </p>
-                  </ToggletipContent>
-                </Toggletip>
-              </div>
-              <div className={styles.deploymentLocationRow}>
-                <div className={styles.workerDropdownWrapper}>
-                  <Dropdown
-                    id="deploy-location"
-                    titleText=""
-                    hideLabel
-                    label="Choose an option"
-                    items={workerOptions}
-                    itemToString={(item) => (item ? item.text : "")}
-                    disabled={isLoadingWorkers}
-                    invalid={showWorkerError && !formData.workerName}
-                    invalidText="Worker resource is required"
-                    selectedItem={
-                      workerOptions.find((w) => w.id === formData.workerName) ||
-                      null
-                    }
-                    onChange={handleWorkerDropdownChange}
-                  />
+          {showLocation && (
+            <Column sm={4} md={8} lg={16}>
+              <div className={styles.deploymentLocationField}>
+                {showLocationHeading && (
+                  <p className={styles.deploymentSectionHeading}>
+                    Deployment location
+                  </p>
+                )}
+                <div className={styles.deploymentLocationLabel}>
+                  <span>{locationLabel}</span>
+                  <Toggletip align="top-start">
+                    <ToggletipButton label={`${locationLabel} information`}>
+                      <Information />
+                    </ToggletipButton>
+                    <ToggletipContent>
+                      <p>{locationTooltip}</p>
+                    </ToggletipContent>
+                  </Toggletip>
                 </div>
-                <IconButton
-                  label="Refresh worker list"
-                  kind="tertiary"
-                  size="md"
-                  className={styles.refreshButton}
-                  onClick={refetchWorkers}
-                >
-                  <Reset />
-                </IconButton>
+                <div className={styles.deploymentLocationRow}>
+                  <div className={styles.workerDropdownWrapper}>
+                    <Dropdown
+                      id="deploy-location"
+                      titleText=""
+                      hideLabel
+                      label="Choose an option"
+                      items={workerOptions}
+                      itemToString={(item) => (item ? item.text : "")}
+                      disabled={isLoadingWorkers}
+                      invalid={showWorkerError && !formData.workerName}
+                      invalidText="Worker resource is required"
+                      selectedItem={
+                        workerOptions.find(
+                          (w) => w.id === formData.workerName,
+                        ) || null
+                      }
+                      onChange={handleWorkerDropdownChange}
+                    />
+                  </div>
+                  <IconButton
+                    label="Refresh worker list"
+                    kind="tertiary"
+                    size="md"
+                    className={styles.refreshButton}
+                    onClick={refetchWorkers}
+                  >
+                    <Reset />
+                  </IconButton>
+                </div>
               </div>
-            </div>
-          </Column>
+            </Column>
+          )}
+
+          {!showLocation && remoteSection && (
+            <Column sm={4} md={8} lg={16}>
+              {remoteSection}
+            </Column>
+          )}
         </Grid>
       </div>
 
