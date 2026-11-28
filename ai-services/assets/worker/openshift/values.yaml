@@ -3,7 +3,7 @@
 appName: ai-services
 
 worker:
-  image: icr.io/ai-services-cicd/ai-services:v0.0.524
+  image: icr.io/ai-services-cicd/ai-services:v0.0.525
   runtime: "openshift"
   token: ""
   gatewayAddr: ""
