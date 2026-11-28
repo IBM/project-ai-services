@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -67,6 +68,13 @@ const (
 	grpcKeepaliveTimeout = 20 * time.Second
 )
 
+// routeHostTimeout bounds how long a worker waits for the cluster to assign the host of its Caddy
+// Route, and routeHostPollInterval is how often it checks. They are variables so tests can shorten them.
+var (
+	routeHostTimeout      = 2 * time.Minute
+	routeHostPollInterval = 2 * time.Second
+)
+
 // StartGrpcStream dials the catalog gRPC worker-gateway, registers with the
 // bootstrap token, and holds the CommandStream open.
 func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts workertypes.GrpcStreamOptions) error {
@@ -104,7 +112,20 @@ func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.Pr
 // loop.  If the stream comes back with codes.Unauthenticated it re-registers
 // before reconnecting.
 func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts workertypes.GrpcStreamOptions) error {
-	workerName, err := register(ctx, opts, rt.Type())
+	// The worker certificate has to carry the host its Caddy Route was assigned, so it cannot
+	// register before that host exists. A worker without Caddy (pr is nil on OpenShift) has no Route.
+	var ingressHost string
+
+	if rt.Type() == types.RuntimeTypeOpenShift && pr != nil {
+		host, err := waitForRouteHost(ctx, rt, workerconstants.WorkerCaddyRouteName)
+		if err != nil {
+			return fmt.Errorf("worker join: %w", err)
+		}
+
+		ingressHost = host
+	}
+
+	workerName, err := register(ctx, opts, rt.Type(), ingressHost)
 	if err != nil {
 		return fmt.Errorf("worker join: register: %w", err)
 	}
@@ -114,9 +135,38 @@ func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercadd
 	return connectAndStream(ctx, rt, pr, opts.GatewayAddr, workerName)
 }
 
+// waitForRouteHost returns the host the cluster assigned to the named Route in the worker's
+// namespace, waiting until it is set. It fails when the Route has no host after routeHostTimeout, so
+// the worker never registers without it.
+func waitForRouteHost(ctx context.Context, rt runtime.Runtime, routeName string) (string, error) {
+	logger.InfofCtx(ctx, "worker join: waiting for the host of route %q...", routeName)
+
+	ctx, cancel := context.WithTimeout(ctx, routeHostTimeout)
+	defer cancel()
+
+	var lastErr error
+
+	for {
+		host, err := runtime.RouteHost(ctx, rt, routeName)
+		if err == nil {
+			logger.InfofCtx(ctx, "worker join: route %q host is %s", routeName, host)
+
+			return host, nil
+		}
+
+		lastErr = err
+
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("route %q has no host after %s: %w", routeName, routeHostTimeout, lastErr)
+		case <-time.After(routeHostPollInterval):
+		}
+	}
+}
+
 // register calls the Register RPC once and returns the worker name bound by
 // the control plane.
-func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.RuntimeType) (string, error) {
+func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.RuntimeType, ingressHost string) (string, error) {
 	logger.InfolnCtx(ctx, "Registering worker with catalog control plane...")
 
 	tlsDir := workerTLSDir()
@@ -143,13 +193,13 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 	defer func() { _ = conn.Close() }()
 
 	// 3. Call Register with token + CSR.
-	// The worker reports its own DOMAIN_SUFFIX and private ingress port in metadata.
+	// The worker reports its private ingress host and port (OpenShift) or DOMAIN_SUFFIX (Podman).
 	logger.InfolnCtx(ctx, "worker join: registering with catalog control plane...")
 	resp, err := workerpb.NewWorkerGatewayClient(conn).Register(ctx, &workerpb.RegisterRequest{
 		PreSharedToken: opts.Token,
 		RuntimeType:    rt.String(),
 		CsrPem:         csrPEM,
-		Metadata:       registerMetadata(ctx, rt),
+		Metadata:       registerMetadata(ctx, rt, ingressHost),
 	})
 	if err != nil {
 		return "", fmt.Errorf("worker join: register RPC: %w", err)
@@ -170,9 +220,23 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 }
 
 // registerMetadata collects metadata sent during worker registration.
-func registerMetadata(ctx context.Context, rt types.RuntimeType) map[string]string {
+//
+// An OpenShift worker with Caddy reports the host its Route was assigned (ingressHost), reached on
+// the router's port. A Podman worker reports its DOMAIN_SUFFIX and private ingress port, from which
+// the control plane builds <name>.<suffix>.
+func registerMetadata(ctx context.Context, rt types.RuntimeType, ingressHost string) map[string]string {
+	if rt == types.RuntimeTypeOpenShift {
+		meta := map[string]string{}
+		if ingressHost != "" {
+			meta[workerconstants.MetaKeyPrivateIngressHost] = ingressHost
+			meta[workerconstants.MetaKeyPrivateIngressPort] = strconv.Itoa(workerconstants.OpenShiftRoutePort)
+		}
+
+		return meta
+	}
+
 	domainSuffix := os.Getenv(proxy.DomainSuffixEnvVar)
-	if domainSuffix == "" && rt == types.RuntimeTypePodman {
+	if domainSuffix == "" {
 		logger.WarningfCtx(ctx, "worker join: %s is not set; the worker certificate will have no DNS SAN and private-ingress hostname verification will fail", proxy.DomainSuffixEnvVar)
 	}
 

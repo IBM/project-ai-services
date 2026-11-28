@@ -41,6 +41,10 @@ type CommonWorkerOptions struct {
 type OpenshiftWorkerOptions struct {
 	WorkerConnectionOptions
 	CommonWorkerOptions
+
+	// CaddyEnabled deploys the worker's Caddy pod, Service and Route. It is false for the
+	// co-located local worker, which shares the control plane's network and uses its Caddy.
+	CaddyEnabled bool
 }
 
 // GrpcStreamOptions carries everything needed to join a worker to the catalog control plane.

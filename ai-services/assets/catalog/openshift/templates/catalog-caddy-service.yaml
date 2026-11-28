@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Service
+metadata:
+  # The Service name is the host LiteLLM uses to reach the private egress, and the host of
+  # CADDY_ADMIN_URL on catalog-backend.
+  name: {{ .Values.appName }}--caddy
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: {{ .Values.appName }}--caddy
+spec:
+  selector:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/component: {{ .Values.appName }}--caddy
+  ports:
+    # ingress: mTLS from remote workers, reached through the passthrough Route.
+    - name: ingress
+      port: 9443
+      targetPort: 9443
+      protocol: TCP
+    # egress: plain HTTP for LiteLLM, which reaches remote models over mTLS through it.
+    - name: egress
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    # admin: Caddy Admin API, used by catalog-backend to register routes. See the NetworkPolicy.
+    - name: admin
+      port: 2019
+      targetPort: 2019
+      protocol: TCP

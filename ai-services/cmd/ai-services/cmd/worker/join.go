@@ -14,6 +14,7 @@ import (
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/mock"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -84,7 +85,12 @@ Obtain a token first by running on the catalog node:
   # Skip specific bootstrap validation checks
   ai-services worker join catalog.example.com:9191 \
       --token           <bootstrap-token> \
-      --skip-validation rhn,power`,
+      --skip-validation rhn,power
+
+  # OpenShift
+  ai-services worker join catalog-worker-gateway-ai-services.apps.example.com:443 \
+      --runtime openshift \
+      --token   <bootstrap-token>`,
 	Args:    cobra.ExactArgs(1),
 	PreRunE: joinPreRunE,
 	RunE:    joinRunE,
@@ -306,39 +312,9 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	gatewayAddr := args[0]
 
-	var pr *workercaddy.ProxyRouter
-	var rt runtime.Runtime
-
-	switch types.RuntimeType(runtimeType) {
-	case types.RuntimeTypePodman:
-		var err error
-		rt, err = runtime.CreateRuntime(types.RuntimeTypePodman, "")
-		if err != nil {
-			return fmt.Errorf("worker grpcstream: init runtime: %w", err)
-		}
-
-		// ── Build Caddy proxy router (Podman only) ──────────────────────
-		// Must happen after Setup so the Caddy pod is running and its admin port
-		// is discoverable. For OpenShift workers routes are managed natively.
-		if mock.Enabled() {
-			pr = workercaddy.NewInMemoryProxyRouter()
-
-			break
-		}
-
-		pr, err = workercaddy.NewProxyRouter(ctx)
-		if err != nil {
-			return fmt.Errorf("worker grpcstream: init local Caddy manager: %w", err)
-		}
-	case types.RuntimeTypeOpenShift:
-		var err error
-		rt, err = runtime.CreateRuntime(types.RuntimeTypeOpenShift, catalogns.Get())
-		if err != nil {
-			return fmt.Errorf("worker grpcstream: init runtime: %w", err)
-		}
-
-	default:
-		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
+	rt, pr, err := initStreamRuntime(ctx)
+	if err != nil {
+		return err
 	}
 
 	opts := workertypes.GrpcStreamOptions{
@@ -348,14 +324,57 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 		},
 	}
 
-	err := join.StartGrpcStream(ctx, rt, pr, opts)
-	if err != nil {
+	if err := join.StartGrpcStream(ctx, rt, pr, opts); err != nil {
 		logger.ErrorfCtx(ctx, "%s: %v\n", workerconstants.WorkerJoinErr, err)
 
 		return fmt.Errorf("%s: %w", workerconstants.WorkerJoinErr, err)
 	}
 
 	return nil
+}
+
+// initStreamRuntime creates the worker's runtime and, when the worker runs a Caddy, the router that
+// manages its routes. The router is nil for a worker without Caddy.
+func initStreamRuntime(ctx context.Context) (runtime.Runtime, *workercaddy.ProxyRouter, error) {
+	switch types.RuntimeType(runtimeType) {
+	case types.RuntimeTypePodman:
+		rt, err := runtime.CreateRuntime(types.RuntimeTypePodman, "")
+		if err != nil {
+			return nil, nil, fmt.Errorf("worker grpcstream: init runtime: %w", err)
+		}
+
+		// Must happen after Setup so the Caddy pod is running and its admin port is discoverable.
+		if mock.Enabled() {
+			return rt, workercaddy.NewInMemoryProxyRouter(), nil
+		}
+
+		pr, err := workercaddy.NewProxyRouter(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("worker grpcstream: init local Caddy manager: %w", err)
+		}
+
+		return rt, pr, nil
+	case types.RuntimeTypeOpenShift:
+		rt, err := runtime.CreateRuntime(types.RuntimeTypeOpenShift, catalogns.Get())
+		if err != nil {
+			return nil, nil, fmt.Errorf("worker grpcstream: init runtime: %w", err)
+		}
+
+		// The worker chart deploys a Caddy pod (CADDY_ADMIN_URL) for remote workers only; the
+		// co-located local worker shares the control plane's network and has none.
+		if utils.GetEnv(proxy.CaddyAdminURLEnvVar, "") == "" {
+			return rt, nil, nil
+		}
+
+		pr, err := workercaddy.NewProxyRouter(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("worker grpcstream: init local Caddy manager: %w", err)
+		}
+
+		return rt, pr, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported runtime type: %s", runtimeType)
+	}
 }
 
 func newGrpcStreamCmd() *cobra.Command {

@@ -38,24 +38,35 @@ func isValidDomainSuffix(suffix string) bool {
 
 // workerCertDNSNames returns the DNS SANs the gateway embeds in a worker's
 // certificate. They are derived from the token-bound worker name and the
-// worker's reported domain suffix, never from the CSR, so a worker cannot claim
+// worker's reported metadata, never from the CSR, so a worker cannot claim
 // another node's identity. Go TLS ignores the CN, so the SAN must cover the
 // hostname the control-plane Caddy uses as ServerName when dialing the worker's
-// private ingress.
+// private ingress: <name>.<domain suffix> for a Podman worker and, for an
+// OpenShift worker, the host its Caddy Route was assigned. An OpenShift worker
+// without a Caddy reports no host and gets no SAN.
 func workerCertDNSNames(workerName string, runtimeType types.RuntimeType, meta map[string]string) []string {
-	if runtimeType != types.RuntimeTypePodman {
-		return nil
-	}
 	if !isValidWorkerName(workerName) {
 		return nil
 	}
 
-	domainSuffix := meta[workerconstants.MetaKeyDomainSuffix]
-	if !isValidDomainSuffix(domainSuffix) {
+	switch runtimeType {
+	case types.RuntimeTypePodman:
+		domainSuffix := meta[workerconstants.MetaKeyDomainSuffix]
+		if !isValidDomainSuffix(domainSuffix) {
+			return nil
+		}
+
+		return []string{workerName + "." + domainSuffix}
+	case types.RuntimeTypeOpenShift:
+		host := meta[workerconstants.MetaKeyPrivateIngressHost]
+		if !isValidDomainSuffix(host) {
+			return nil
+		}
+
+		return []string{host}
+	default:
 		return nil
 	}
-
-	return []string{workerName + "." + domainSuffix}
 }
 
 // signWorkerCSR validates and signs a PEM-encoded CSR using the gateway CA,

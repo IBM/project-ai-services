@@ -1,0 +1,65 @@
+# Default-deny for the namespace, and the allow rules the deployment needs.
+#
+# NetworkPolicies are additive: a pod is reachable if ANY policy selecting it allows the traffic.
+# The control-plane Caddy Admin API (:2019) is unauthenticated, so the "same namespace" allow rule
+# below must not select the ai-services--caddy pod, or it would reopen :2019 to every pod here. The
+# ai-services--caddy pod is governed only by the ai-services--caddy-admin policy.
+#
+# Verify after install (an unrelated pod must time out, catalog-backend must succeed):
+#   oc run np-test -n <ns> --rm -it --restart=Never --image=<any image with curl> -- \
+#     curl -m 5 -s -o /dev/null -w '%{http_code}\n' http://ai-services--caddy:2019/config/
+#
+# A NetworkPolicy cannot tell a pod from the catalog backend from any other pod that carries its
+# labels, so anyone who may create pods in this namespace can reach :2019 by copying them. Do not
+# grant `create` on pods, deployments, statefulsets, jobs or cronjobs in this namespace to anyone
+# but the installer; `edit` and `admin` on the namespace include it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-namespace-and-router
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  # Every pod except the control-plane Caddy, which has its own policy. NotIn also matches a pod
+  # that has no component label.
+  podSelector:
+    matchExpressions:
+      - key: ai-services.io/component
+        operator: NotIn
+        values:
+          - {{ .Values.appName }}--caddy
+  policyTypes:
+    - Ingress
+  ingress:
+    # Pods of this namespace (backend, UI, databases, LiteLLM, deployed applications).
+    - from:
+        - podSelector: {}
+    # The OpenShift router, for the Routes (API, UI, model gateway, worker gateway), including a
+    # router on the host network.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              policy-group.network.openshift.io/ingress: ""
+        - namespaceSelector:
+            matchLabels:
+              policy-group.network.openshift.io/host-network: ""
+    # Cluster monitoring scrapes.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: monitoring

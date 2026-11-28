@@ -6,7 +6,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/catalogns"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeopenshift "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 )
 
@@ -15,6 +15,8 @@ const (
 	gatewayRouteName = "catalog-worker-gateway"
 	// modelGatewayRouteName is the OpenShift Route name for the LiteLLM model gateway.
 	modelGatewayRouteName = "model-gateway"
+	// caddyRouteName is the OpenShift Route name for the control-plane Caddy private ingress.
+	caddyRouteName = catalogconstants.CatalogAppName + "--caddy"
 )
 
 // GatewayRouteHost looks up the live OpenShift passthrough route for the worker
@@ -26,6 +28,17 @@ const (
 // assigned yet, an error is returned.
 func GatewayRouteHost(ctx context.Context) (string, error) {
 	return routeHost(ctx, gatewayRouteName)
+}
+
+// CaddyRouteHost looks up the live OpenShift passthrough route of the control-plane Caddy and
+// returns its hostname (.spec.host). Remote workers dial it for the private ingress (LiteLLM), so
+// it has to be in the gateway server certificate's SANs and is the SNI the worker's egress route
+// verifies.
+//
+// If no route named "ai-services--caddy" is found, or the route has no host assigned yet, an error is
+// returned.
+func CaddyRouteHost(ctx context.Context) (string, error) {
+	return routeHost(ctx, caddyRouteName)
 }
 
 // ModelGatewayRouteHost looks up the live OpenShift route for the LiteLLM model gateway
@@ -43,21 +56,5 @@ func routeHost(ctx context.Context, routeName string) (string, error) {
 		return "", fmt.Errorf("create OpenShift client to look up route %q: %w", routeName, err)
 	}
 
-	labelSelector := fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalogconstants.CatalogAppName)
-	routes, err := oc.ListRoutes(ctx, labelSelector)
-	if err != nil {
-		return "", fmt.Errorf("list routes (selector=%s): %w", labelSelector, err)
-	}
-
-	for _, r := range routes {
-		if r.Name == routeName {
-			if r.HostPort == "" {
-				return "", fmt.Errorf("route %q exists but has no host assigned yet", routeName)
-			}
-
-			return r.HostPort, nil
-		}
-	}
-
-	return "", fmt.Errorf("route %q not found (selector=%s)", routeName, labelSelector)
+	return runtime.RouteHost(ctx, oc, routeName)
 }

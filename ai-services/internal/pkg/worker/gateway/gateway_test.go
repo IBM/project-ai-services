@@ -21,6 +21,7 @@ import (
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
@@ -164,6 +165,16 @@ func preregister(t *testing.T, reg *registry.Registry, workerName string) string
 // returns a connected client plus a stop func.
 func startTestGateway(t *testing.T, reg *registry.Registry) (workerpb.WorkerGatewayClient, func()) {
 	t.Helper()
+
+	// These tests are about registration and the command stream, not route registration: keep the
+	// LiteLLM egress route off the wire.
+	origProxy, origAddr := proxyFor, liteLLMIngressAddr
+	proxyFor = func(*Gateway, string) proxy.ProxyManager { return &recordingProxy{} }
+	liteLLMIngressAddr = func(context.Context, types.RuntimeType) (string, string, error) {
+		return "catalog-worker-gateway.example.com", proxy.DefaultPrivateIngressPort, nil
+	}
+
+	t.Cleanup(func() { proxyFor, liteLLMIngressAddr = origProxy, origAddr })
 
 	caKey, caCert, _, err := generateCA()
 	if err != nil {
@@ -772,6 +783,7 @@ func TestSignWorkerCSR_IgnoresCSRSANs(t *testing.T) {
 
 func TestWorkerCertDNSNames(t *testing.T) {
 	meta := map[string]string{workerconstants.MetaKeyDomainSuffix: "10.0.0.5.nip.io"}
+	routeMeta := map[string]string{workerconstants.MetaKeyPrivateIngressHost: "ai-services--caddy-ns.apps.example.com"}
 
 	tests := []struct {
 		name    string
@@ -782,7 +794,10 @@ func TestWorkerCertDNSNames(t *testing.T) {
 		{"podman with domain suffix", types.RuntimeTypePodman, meta, []string{"w1.10.0.0.5.nip.io"}},
 		{"podman without domain suffix", types.RuntimeTypePodman, map[string]string{}, nil},
 		{"podman nil metadata", types.RuntimeTypePodman, nil, nil},
-		{"openshift is not supported yet", types.RuntimeTypeOpenShift, meta, nil},
+		{"openshift with its Route host", types.RuntimeTypeOpenShift, routeMeta, []string{"ai-services--caddy-ns.apps.example.com"}},
+		{"openshift without a Caddy Route", types.RuntimeTypeOpenShift, map[string]string{}, nil},
+		{"openshift ignores the podman domain suffix", types.RuntimeTypeOpenShift, meta, nil},
+		{"openshift with a wildcard host", types.RuntimeTypeOpenShift, map[string]string{workerconstants.MetaKeyPrivateIngressHost: "*.example.com"}, nil},
 		{"podman with wildcard domain suffix", types.RuntimeTypePodman, map[string]string{workerconstants.MetaKeyDomainSuffix: "*.example.com"}, nil},
 		{"podman with leading dot domain suffix", types.RuntimeTypePodman, map[string]string{workerconstants.MetaKeyDomainSuffix: ".example.com"}, nil},
 	}

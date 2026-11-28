@@ -1,5 +1,9 @@
+# appName prefixes the Caddy resource names (<appName>--caddy), as on Podman. The CLI sets it from
+# the app-name constants.
+appName: ai-services
+
 worker:
-  image: icr.io/ai-services-cicd/ai-services:v0.0.524
+  image: icr.io/ai-services-cicd/ai-services:v0.0.525
   runtime: "openshift"
   token: ""
   gatewayAddr: ""
@@ -14,3 +18,28 @@ worker:
       cpu: "1000m"
   tls:
     storage: 10Mi
+
+# Caddy pod (its own Deployment, as on Podman) that terminates the private mTLS traffic between this
+# worker and the control plane:
+#   - ingress :9443 (mTLS)  control plane -> passthrough Route -> Caddy -> model predictor
+#   - egress  :8080 (http)  service on this cluster -> Caddy -> mTLS -> control plane (LiteLLM)
+#   - admin   :2019         worker -> Caddy Admin API (route registration), through the ai-services--caddy Service
+caddy:
+  image: icr.io/ai-services-cicd/caddy:v2.11.8-2
+  # enabled deploys the Caddy pod, Service, Route, PVC and ConfigMap. `worker join` sets it. The
+  # co-located local worker leaves it off and uses the control plane's Caddy. The Route host is
+  # assigned by the cluster and read back by the worker at registration.
+  enabled: false
+  # storage backs Caddy's config autosave so routes registered at runtime survive a restart.
+  storage: 10Mi
+  networkPolicy:
+    # egressNamespaces are the namespaces, besides the release namespace, whose pods may call the
+    # plain-HTTP egress (:8080), for model or service pods that run elsewhere.
+    egressNamespaces: []
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"

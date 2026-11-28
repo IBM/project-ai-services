@@ -31,10 +31,11 @@
 # files are written by the worker once it has registered with the control plane;
 # until then handshakes on this port fail and then succeed with no Caddy reload.
 :9443 {
-	# Accept only client certificates presented by the control plane (catalog-worker-gateway).
-	# vars_regexp, not vars: vars compares exactly and treats "*" literally, so it would
-	# reject the control plane's own certificate (CN=catalog-worker-gateway).
-	@not_control_plane not vars_regexp {http.request.tls.client.subject} catalog-worker-gateway
+	# Accept only client certificates presented by the control plane, whose whole subject is
+	# CN=catalog-worker-gateway. The pattern is anchored: unanchored, it would also match a
+	# worker certificate whose subject merely contains the name. vars_regexp, not vars: vars
+	# compares exactly and treats "*" literally.
+	@not_control_plane not vars_regexp {http.request.tls.client.subject} ^CN=catalog-worker-gateway$
 	handle @not_control_plane {
 		abort
 	}

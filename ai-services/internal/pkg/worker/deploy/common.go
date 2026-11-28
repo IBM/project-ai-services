@@ -59,6 +59,9 @@ func DeployWorker(ctx context.Context, opts workertypes.DeployOpts) error {
 				Token:       opts.Token,
 			},
 			CommonWorkerOptions: opts.CommonWorkerOptions,
+			// `worker join` never runs on the node co-located with the control plane, so the
+			// worker it deploys is remote and needs its own Caddy.
+			CaddyEnabled: true,
 		}
 		if err := workeropenshift.DeployWorker(ctx, opts); err != nil {
 			return fmt.Errorf("worker join: failed to install worker helm chart: %w", err)

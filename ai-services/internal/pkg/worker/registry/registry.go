@@ -17,8 +17,19 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
+
+// ErrIngressHostInUse is returned by Register when another worker already holds the private
+// ingress host the registering worker claims. Two workers with the same host would get the same
+// certificate SAN, and TLS could not tell a misrouted request from a correct one.
+var ErrIngressHostInUse = fmt.Errorf("private ingress host already in use by another worker")
+
+// ErrReservedWorkerName is returned by Preregister for a name that is also the identity of a
+// control-plane component. A worker certificate's CN is its name, and a worker's Caddy accepts the
+// control plane by its CN, so a worker of this name would be accepted as the control plane.
+var ErrReservedWorkerName = fmt.Errorf("worker name is reserved")
 
 // ErrWorkerAlreadyActive is returned by Register when the named worker already
 // has an active in-memory entry (i.e. a live CommandStream is open).
@@ -109,6 +120,11 @@ type Registry struct {
 	workers    map[string]*WorkerEntry
 	repo       repository.WorkerRepository // may be nil in tests
 	tokenStore *TokenStore
+
+	// registerMu serialises Register so the check that a private ingress host is free and the
+	// write that claims it are one step. Without it two workers registering at once could both
+	// pass the check.
+	registerMu sync.Mutex
 }
 
 // New creates a new Registry backed by the given WorkerRepository.
@@ -128,6 +144,13 @@ func New(repo repository.WorkerRepository) *Registry {
 func (r *Registry) Register(ctx context.Context, workerName, runtimeType string, metadata map[string]string) (*WorkerEntry, error) {
 	if !slices.Contains(validRuntimeTypes, models.WorkerRuntimeType(runtimeType)) {
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedRuntimeType, runtimeType)
+	}
+
+	r.registerMu.Lock()
+	defer r.registerMu.Unlock()
+
+	if err := r.checkIngressHostFree(ctx, workerName, metadata); err != nil {
+		return nil, err
 	}
 
 	k := workerKey(workerName)
@@ -166,6 +189,60 @@ func (r *Registry) Register(ctx context.Context, workerName, runtimeType string,
 	}
 
 	return entry, nil
+}
+
+// IngressHost returns the private ingress host a worker holds, lower-cased: the host it reported
+// (an OpenShift worker reads it from its Route), or <name>.<domain suffix> for a Podman worker.
+// It returns "" for a worker that has none, such as the co-located local worker.
+func IngressHost(workerName string, metadata map[string]string) string {
+	if host := metadata[workerconstants.MetaKeyPrivateIngressHost]; host != "" {
+		return strings.ToLower(host)
+	}
+
+	if suffix := metadata[workerconstants.MetaKeyDomainSuffix]; suffix != "" {
+		return strings.ToLower(workerName + "." + suffix)
+	}
+
+	return ""
+}
+
+// checkIngressHostFree returns ErrIngressHostInUse when a worker other than workerName holds the
+// host that metadata claims. It looks at connected workers and at persisted ones, so a worker that
+// is only disconnected still keeps its host. The caller must hold registerMu.
+func (r *Registry) checkIngressHostFree(ctx context.Context, workerName string, metadata map[string]string) error {
+	host := IngressHost(workerName, metadata)
+	if host == "" {
+		return nil
+	}
+
+	self := workerKey(workerName)
+
+	r.mu.RLock()
+	for key, e := range r.workers {
+		if key != self && IngressHost(e.WorkerName, e.Metadata) == host {
+			r.mu.RUnlock()
+
+			return fmt.Errorf("%w: %s is held by %s", ErrIngressHostInUse, host, e.WorkerName)
+		}
+	}
+	r.mu.RUnlock()
+
+	if r.repo == nil {
+		return nil
+	}
+
+	all, err := r.repo.GetAll(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("worker registry: list workers to check ingress host: %w", err)
+	}
+
+	for i := range all {
+		if workerKey(all[i].Name) != self && IngressHost(all[i].Name, metadataToString(all[i].Metadata)) == host {
+			return fmt.Errorf("%w: %s is held by %s", ErrIngressHostInUse, host, all[i].Name)
+		}
+	}
+
+	return nil
 }
 
 // Restore re-creates the in-memory entry for a previously-registered worker whose
@@ -243,6 +320,10 @@ func (r *Registry) Restore(ctx context.Context, workerName string) (*WorkerEntry
 // open), it is evicted first so that the stale connection can no longer update the
 // heartbeat on the now-pending row.
 func (r *Registry) Preregister(ctx context.Context, workerName string) (string, error) {
+	if strings.EqualFold(workerName, workerconstants.WorkerGatewayName) {
+		return "", fmt.Errorf("%w: %q", ErrReservedWorkerName, workerName)
+	}
+
 	if r.repo == nil {
 		return "", fmt.Errorf("worker registry: no repository configured")
 	}

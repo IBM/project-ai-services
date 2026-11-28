@@ -45,9 +45,20 @@ type fakeDomains struct {
 	suffix string
 	port   string
 	err    error
+	// host overrides the dialed host; by default it is <worker>.<suffix>, as for a Podman worker.
+	host string
 }
 
-func (f fakeDomains) DomainSuffix(string) (string, error) { return f.suffix, f.err }
+func (f fakeDomains) PrivateIngressHost(name string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.host != "" {
+		return f.host, nil
+	}
+
+	return name + "." + f.suffix, nil
+}
 func (f fakeDomains) PrivateIngressPort(string) string {
 	if f.port != "" {
 		return f.port
@@ -90,6 +101,17 @@ func TestRegister(t *testing.T) {
 	assert.Equal(t, "/etc/secret/catalog-mtls-encryption-secret/mtls-encryption-key", e.SecretFilePath)
 	assert.Equal(t, "/data/gateway-pki/ca.crt", e.TrustedCACertPath)
 	assert.Empty(t, wk.unregistered, "nothing is rolled back on success")
+
+	t.Run("OpenShift worker is dialed at its Caddy route host on 443", func(t *testing.T) {
+		ocCP, ocWK := &fakeProxy{}, &fakeProxy{}
+		ocM := newTestManager(fakeDomains{host: "caddy-w1.apps.example.com", port: "443"}, ocCP, ocWK)
+
+		_, err := ocM.Register(context.Background(), nil, "w1", id, "model-predictor.ai-services-models.svc.cluster.local:8000")
+		require.NoError(t, err)
+		require.Len(t, ocCP.egress, 1)
+		assert.Equal(t, "caddy-w1.apps.example.com:443", ocCP.egress[0].DialUpstream)
+		assert.Equal(t, "caddy-w1.apps.example.com", ocCP.egress[0].ServerName, "SNI must match the passthrough route host")
+	})
 
 	t.Run("custom worker private ingress port", func(t *testing.T) {
 		customCP, customWK := &fakeProxy{}, &fakeProxy{}

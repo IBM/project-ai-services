@@ -8,6 +8,10 @@ metadata:
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   replicas: 1
+  # gateway-pki is ReadWriteOnce and also mounted by ai-services--caddy, so the old pod must release it
+  # before the new one starts.
+  strategy:
+    type: Recreate
   minReadySeconds: 10
   selector:
     matchLabels:
@@ -120,6 +124,10 @@ spec:
               value: "{{ .Values.backend.workerGatewayPort }}"
             - name: LOCAL_WORKER
               value: "{{ .Values.backend.localWorker }}"
+            # The backend registers the per-model egress routes of remote workers on the control-plane
+            # Caddy. The Service name is also the host LiteLLM uses to reach its private egress.
+            - name: CADDY_ADMIN_URL
+              value: "http://{{ .Values.appName }}--caddy:2019"
             # LiteLLM runs in its own deployment; the catalog backend registers model routes through it.
             - name: LITELLM_ENDPOINT
               value: "http://litellm:{{ .Values.litellm.port }}"

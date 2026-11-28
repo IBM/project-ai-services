@@ -1,0 +1,31 @@
+{{- if .Values.caddy.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.appName }}--caddy
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: {{ .Values.appName }}--caddy
+spec:
+  selector:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/component: {{ .Values.appName }}--caddy
+  ports:
+    # ingress: mTLS from the control plane, reached through the passthrough Route.
+    - name: ingress
+      port: 9443
+      targetPort: 9443
+      protocol: TCP
+    # egress: plain HTTP for services on this cluster that call the control plane (LiteLLM).
+    - name: egress
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    # admin: Caddy Admin API, used by the worker to register routes. See the NetworkPolicy.
+    - name: admin
+      port: 2019
+      targetPort: 2019
+      protocol: TCP
+{{- end }}

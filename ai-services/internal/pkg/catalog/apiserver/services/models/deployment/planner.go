@@ -59,7 +59,7 @@ func NewModelPlanner(provider *catalog.CatalogProvider, workers worker.Resolver)
 		workers:         workers,
 		deployers: map[runtimeTypes.RuntimeType]types.Deployer{
 			runtimeTypes.RuntimeTypePodman:    podman.NewPodmanDeployer(routes.NewManager(workers)),
-			runtimeTypes.RuntimeTypeOpenShift: openshift.NewOpenShiftDeployer(),
+			runtimeTypes.RuntimeTypeOpenShift: openshift.NewOpenShiftDeployer(routes.NewManager(workers)),
 		},
 	}
 }

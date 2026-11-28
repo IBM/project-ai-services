@@ -8,7 +8,6 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
@@ -20,17 +19,10 @@ const (
 )
 
 // LiteLLMEgressRoute builds the worker-side route that forwards LiteLLM calls over mTLS to the
-// control-plane private ingress. The control plane is dialed at the gateway hostname, which the
-// worker already resolves and which is in the gateway server certificate's SANs.
-func LiteLLMEgressRoute() (proxy.EgressRoute, error) {
-	suffix := utils.GetEnv(proxy.DomainSuffixEnvVar, "")
-	if suffix == "" {
-		return proxy.EgressRoute{}, fmt.Errorf("%s environment variable not set", proxy.DomainSuffixEnvVar)
-	}
-
-	host := workerconstants.WorkerGatewayName + "." + suffix
-	port := utils.GetEnv(proxy.CaddyPrivateIngressPortEnvVar, proxy.DefaultPrivateIngressPort)
-
+// control-plane private ingress, dialed at host:port. host is also the name verified against the
+// gateway server certificate, so it has to be one of that certificate's SANs and one the worker's
+// Caddy can resolve.
+func LiteLLMEgressRoute(host, port string) proxy.EgressRoute {
 	return proxy.EgressRoute{
 		ID:                     workerconstants.LiteLLMEgressRouteID,
 		PathPrefix:             workerconstants.LiteLLMPathPrefix,
@@ -40,18 +32,17 @@ func LiteLLMEgressRoute() (proxy.EgressRoute, error) {
 		SecretFilePath:         workerconstants.WorkerMTLSKeyPath,
 		TrustedCACertPath:      workerconstants.WorkerTLSDir + "/ca.crt",
 		ServerName:             host,
-	}, nil
+	}
 }
 
 // RegisterLiteLLMEgress registers the LiteLLM egress route on the worker's Caddy so services on
-// the worker can reach LiteLLM through the control plane. Registering an existing route is a
-// no-op, so it is safe on every (re)connect. It retries until the worker's Caddy answers or ctx
-// ends (the stream closed).
-func RegisterLiteLLMEgress(ctx context.Context, pm proxy.ProxyManager, workerName string) error {
-	route, err := LiteLLMEgressRoute()
-	if err != nil {
-		return fmt.Errorf("build LiteLLM egress route for worker %s: %w", workerName, err)
-	}
+// the worker can reach LiteLLM through the control plane, which is dialed at host:port. Registering
+// an existing route is a no-op, so it is safe on every (re)connect. It retries until the worker's
+// Caddy answers or ctx ends (the stream closed).
+func RegisterLiteLLMEgress(ctx context.Context, pm proxy.ProxyManager, workerName, host, port string) error {
+	route := LiteLLMEgressRoute(host, port)
+
+	var err error
 
 	for attempt := 1; attempt <= liteLLMEgressAttempts; attempt++ {
 		err = pm.RegisterEgressRoute(ctx, route)

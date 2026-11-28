@@ -1,0 +1,26 @@
+{{- if .Values.caddy.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ .Values.appName }}--caddy
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+  annotations:
+    # Model responses can stream for a long time.
+    haproxy.router.openshift.io/timeout: 1h
+spec:
+  # No host: the cluster assigns one. The worker reads it back before it registers, and the control
+  # plane puts it in the worker certificate and dials it (passthrough routing is SNI based).
+  port:
+    targetPort: ingress
+  to:
+    kind: Service
+    name: {{ .Values.appName }}--caddy
+  tls:
+    # passthrough keeps mTLS end to end: the router forwards the encrypted stream untouched,
+    # so Caddy sees the control plane's client certificate.
+    termination: passthrough
+    insecureEdgeTerminationPolicy: None
+{{- end }}

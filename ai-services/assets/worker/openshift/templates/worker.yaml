@@ -8,6 +8,10 @@ metadata:
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   replicas: 1
+  # The pod mounts the ReadWriteOnce worker-tls volume. A rolling update starts the new pod while the
+  # old one still holds it, which can leave it Pending.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       ai-services.io/application: {{ .Release.Name }}
@@ -21,7 +25,10 @@ spec:
         ai-services.io/component: worker
     spec:
       serviceAccountName: {{ .Release.Namespace }}-sa
-      automountServiceAccountToken: true
+      # The service account token is mounted into the worker container only (see the sa-token
+      # volume). The Caddy pod is a separate pod and does not mount it: Caddy faces the network,
+      # and that token carries the worker's RBAC (routes, InferenceServices).
+      automountServiceAccountToken: false
       {{- if .Values.hostAliases }}
       hostAliases:
       {{- range .Values.hostAliases }}
@@ -53,6 +60,11 @@ spec:
                 secretKeyRef:
                   name: worker-mtls-encryption-secret
                   key: mtls-encryption-key
+            {{- if .Values.caddy.enabled }}
+            # The worker Caddy runs in its own pod; its Admin API is reached through the ai-services--caddy Service.
+            - name: CADDY_ADMIN_URL
+              value: "http://{{ .Values.appName }}--caddy:2019"
+            {{- end }}
           resources:
             requests:
               memory: "{{ .Values.worker.resources.requests.memory }}"
@@ -63,7 +75,28 @@ spec:
           volumeMounts:
             - name: worker-tls
               mountPath: /data/worker-tls
+            - name: sa-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
       volumes:
         - name: worker-tls
           persistentVolumeClaim:
             claimName: worker-tls
+        # The same three files the kubelet mounts for an automounted token, so in-cluster client
+        # configuration finds them at the usual path.
+        - name: sa-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3607
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace

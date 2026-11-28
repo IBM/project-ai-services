@@ -1,0 +1,64 @@
+{{- if .Values.caddy.enabled }}
+# Who may reach the worker's Caddy pod. The worker pod's own traffic is not affected: this selects
+# only the ai-services--caddy pod and limits ingress.
+#
+#   :9443  the private mTLS ingress, reached through the passthrough Route: the OpenShift router
+#          only. Caddy still requires and verifies the control plane's client certificate.
+#   :8080  the plain-HTTP egress that services on this cluster use to call the control plane
+#          (LiteLLM): the release namespace, plus caddy.networkPolicy.egressNamespaces for model
+#          or service namespaces that live elsewhere.
+#   :2019  the Admin API, which the worker pod uses to register routes. It is unauthenticated, so
+#          only the worker pod may reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Values.appName }}--caddy
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  podSelector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: {{ .Values.appName }}--caddy
+  policyTypes:
+    - Ingress
+  ingress:
+    # Admin API: the worker pod only.
+    - from:
+        - podSelector:
+            matchLabels:
+              ai-services.io/application: {{ .Release.Name }}
+              ai-services.io/component: worker
+      ports:
+        - port: 2019
+          protocol: TCP
+    # Egress: services in the model and service namespaces.
+    - from:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - {{ .Release.Namespace }}
+                  {{- range .Values.caddy.networkPolicy.egressNamespaces }}
+                  - {{ . }}
+                  {{- end }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    # Ingress: the OpenShift router. A router on the host network (HostNetwork endpoint
+    # publishing) is not matched by the ingress policy-group label, so it is allowed explicitly.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              policy-group.network.openshift.io/ingress: ""
+        - namespaceSelector:
+            matchLabels:
+              policy-group.network.openshift.io/host-network: ""
+      ports:
+        - port: 9443
+          protocol: TCP
+    # Probes run from the node (kubelet) and are not subject to NetworkPolicy.
+{{- end }}

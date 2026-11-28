@@ -44,7 +44,7 @@ const (
 	GatewayPKIDir = "/data/gateway-pki"
 
 	// WorkerCaddyPodName is the name of the Caddy reverse-proxy pod.
-	WorkerCaddyPodName = "ai-services--caddy"
+	WorkerCaddyPodName = WorkerAppName + "--caddy"
 
 	// WorkerPodName is the name of the Pod running the worker gRPC stream service.
 	WorkerPodName = "ai-services--worker"
@@ -73,11 +73,21 @@ const (
 
 	// MetaKeyDomainSuffix is the worker metadata key for the worker's own DOMAIN_SUFFIX.
 	// Sent at Register time so the gateway can embed the worker's dial hostname
-	// (<workerName>.<domainSuffix>) as a SAN in the worker's certificate.
+	// (<workerName>.<domainSuffix>) as a SAN in the worker's certificate. Podman workers only.
 	MetaKeyDomainSuffix = "domainSuffix"
+
+	// MetaKeyPrivateIngressHost is the worker metadata key for the host of the worker's own Caddy
+	// Route, as assigned by the cluster. An OpenShift worker reads it from its Route and reports it
+	// at Register time; the gateway embeds it as the SAN of the worker's certificate and the control
+	// plane dials it, using it as the SNI. Empty for a worker without Caddy.
+	MetaKeyPrivateIngressHost = "privateIngressHost"
 
 	// MetaKeyPrivateIngressPort is the worker metadata key for the worker's private ingress port.
 	MetaKeyPrivateIngressPort = "privateIngressPort"
+
+	// WorkerCaddyRouteName is the name of the OpenShift Route of a worker's Caddy private ingress.
+	// The Route has no spec.host, so the cluster assigns it and the worker reads it back.
+	WorkerCaddyRouteName = WorkerCaddyPodName
 
 	// WorkerGatewayPort is the default port used by the catalog gRPC worker gateway.
 	WorkerGatewayPort = 9191
@@ -92,6 +102,8 @@ const (
 	// value-override keys used when deploying worker pods.
 	ArgParamWorkerToken       = "worker.token"
 	ArgParamWorkerGatewayAddr = "worker.gatewayAddr"
+	ArgParamCaddyEnabled      = "caddy.enabled"
+	ArgParamAppName           = "appName"
 	ArgParamWorkerPodmanURI   = "worker.podman.uri"
 	ArgParamWorkerAuthFile    = "worker.podman.authFileContent"
 

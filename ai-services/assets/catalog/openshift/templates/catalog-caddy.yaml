@@ -1,0 +1,172 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.appName }}--caddy
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: {{ .Values.appName }}--caddy
+spec:
+  replicas: 1
+  # gateway-pki and caddy-catalog are ReadWriteOnce, so the old pod must release them first.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: {{ .Values.appName }}--caddy
+  template:
+    metadata:
+      labels:
+        ai-services.io/application: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+        ai-services.io/component: {{ .Values.appName }}--caddy
+    spec:
+      automountServiceAccountToken: false
+      # The control-plane Caddy dials each worker's Route host to reach its models. Where the
+      # cluster cannot resolve those hosts (a lab without shared DNS), map them here, as the worker
+      # chart does for the control plane's hosts.
+      {{- if .Values.hostAliases }}
+      hostAliases:
+      {{- range .Values.hostAliases }}
+      - ip: "{{ .ip }}"
+        hostnames:
+        {{- range .hostnames }}
+          - "{{ . }}"
+        {{- end }}
+      {{- end }}
+      {{- end }}
+      # gateway-pki is a ReadWriteOnce volume that catalog-backend also mounts, so both pods have
+      # to share a node. Required, not preferred: without it the pod would sit in ContainerCreating.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  ai-services.io/application: {{ .Release.Name }}
+                  ai-services.io/component: catalog-backend
+      containers:
+        - name: caddy
+          image: "{{ .Values.caddy.image }}"
+          imagePullPolicy: IfNotPresent
+          # Caddy reads ca.crt of the :9443 ingress when it loads its config, so it cannot start
+          # before the catalog backend has generated the gateway PKI. Wait for it instead of
+          # crash-looping.
+          #
+          # /usr/bin/caddy carries a file capability (cap_net_bind_service) that the restricted SCC
+          # refuses to exec (the capability is not in the bounding set). Every port used here is
+          # above 1024, so a copy without the capability is run instead.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              until [ -s /data/gateway-pki/ca.crt ]; do
+                echo "waiting for /data/gateway-pki/ca.crt: the catalog backend has not generated the PKI yet"
+                sleep 2
+              done
+              # --- reset stale autosave
+              # --resume makes Caddy load /config/caddy/autosave.json instead of the Caddyfile once
+              # that file exists, so a changed Caddyfile (an upgrade) would never take effect. When
+              # the Caddyfile differs from the one applied on the last start, drop the autosave so
+              # the new one loads. Routes registered at runtime are lost with it.
+              mkdir -p /config/caddy
+              if [ -f /config/caddy/autosave.json ] && [ "$(cat /config/caddy/Caddyfile.applied 2>/dev/null)" != "$(cat /etc/caddy/Caddyfile)" ]; then
+                echo "the Caddyfile changed since the last start: discarding the saved config"
+                rm -f /config/caddy/autosave.json
+              fi
+              cp /etc/caddy/Caddyfile /config/caddy/Caddyfile.applied
+              # --- end reset stale autosave
+              cp /usr/bin/caddy /tmp/caddy
+              exec /tmp/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile --resume
+          env:
+            - name: XDG_CONFIG_HOME
+              value: /config
+            - name: XDG_DATA_HOME
+              value: /data
+          ports:
+            - name: ingress
+              containerPort: 9443
+              protocol: TCP
+            - name: egress
+              containerPort: 8080
+              protocol: TCP
+            - name: admin
+              containerPort: 2019
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              memory: "{{ .Values.caddy.resources.requests.memory }}"
+              cpu: "{{ .Values.caddy.resources.requests.cpu }}"
+            limits:
+              memory: "{{ .Values.caddy.resources.limits.memory }}"
+              cpu: "{{ .Values.caddy.resources.limits.cpu }}"
+          # Caddy only listens once the gateway PKI exists, which can take a while after a fresh
+          # install. The startup probe allows up to 10 minutes and holds liveness off until then.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 120
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: caddyfile
+              mountPath: /etc/caddy
+              readOnly: true
+            # Caddy's config autosave (--resume): keeps runtime-registered egress routes across a restart.
+            - name: caddy-config
+              mountPath: /config
+            - name: caddy-data
+              mountPath: /data
+            - name: caddy-tmp
+              mountPath: /tmp
+            # Mount only the public/ subdirectory to keep the root CA private key (ca.key) out of
+            # the Caddy container. Holds ca.crt, server.crt and the encrypted server.key.
+            - name: gateway-pki
+              mountPath: /data/gateway-pki
+              subPath: public
+              readOnly: true
+            # Secret the encrypted_file module uses to decrypt server.key in memory.
+            - name: catalog-mtls-encryption-secret
+              mountPath: /etc/secret/catalog-mtls-encryption-secret
+              readOnly: true
+      volumes:
+        - name: caddyfile
+          configMap:
+            name: {{ .Values.appName }}--caddy
+        - name: caddy-config
+          persistentVolumeClaim:
+            claimName: caddy-catalog
+        - name: caddy-data
+          emptyDir: {}
+        - name: caddy-tmp
+          emptyDir: {}
+        - name: gateway-pki
+          persistentVolumeClaim:
+            claimName: gateway-pki
+        - name: catalog-mtls-encryption-secret
+          secret:
+            secretName: catalog-mtls-encryption-secret

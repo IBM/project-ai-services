@@ -74,11 +74,19 @@ func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) 
 // prepareValues builds the Helm values map for the worker chart.
 // It generates the argument parameters from the gateway address and token,
 // then merges them with the chart's default values via the template provider.
+//
+// A remote worker also gets its Caddy pod and Route, whose host the cluster assigns and the
+// worker reads back at registration. The co-located local worker has no Caddy.
 func prepareValues(tp templates.Template, opts workertypes.OpenshiftWorkerOptions) (map[string]any, error) {
 	// Generate argument parameters
 	argParams := map[string]string{
 		workerconstants.ArgParamWorkerToken:       opts.Token,
 		workerconstants.ArgParamWorkerGatewayAddr: opts.GatewayAddr,
+		workerconstants.ArgParamAppName:           workerconstants.WorkerAppName,
+	}
+
+	if opts.CaddyEnabled {
+		argParams[workerconstants.ArgParamCaddyEnabled] = "true"
 	}
 
 	// Load values from chart with overrides

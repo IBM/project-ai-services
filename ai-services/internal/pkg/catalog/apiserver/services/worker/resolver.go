@@ -29,6 +29,11 @@ type Resolver interface {
 	// DomainSuffix returns the DOMAIN_SUFFIX the named worker reported when it registered. It is
 	// what, with the worker name, forms the hostname the control plane dials for private traffic.
 	DomainSuffix(name string) (string, error)
+	// PrivateIngressHost returns the hostname the control plane dials, and verifies in the worker's
+	// certificate, for the named worker's private ingress: <name>.<domain suffix> for a Podman
+	// worker and, for an OpenShift worker, the host its Caddy Route was assigned, as it reported
+	// at registration.
+	PrivateIngressHost(name string) (string, error)
 	// PrivateIngressPort returns the private ingress port the named worker reported when it registered,
 	// or proxy.DefaultPrivateIngressPort if unset.
 	PrivateIngressPort(name string) string
@@ -126,6 +131,34 @@ func (r *registryResolver) DomainSuffix(name string) (string, error) {
 	}
 
 	return suffix, nil
+}
+
+// PrivateIngressHost returns the hostname of the named worker's private ingress. It is the name the
+// gateway put in the worker certificate (see gateway.workerCertDNSNames), so the name the control
+// plane dials is always the name the certificate carries. It is the host the worker reported when
+// it registered (an OpenShift worker reads it from its Route); a Podman worker that reported none
+// uses <name>.<domain suffix>.
+func (r *registryResolver) PrivateIngressHost(name string) (string, error) {
+	if r.registry == nil {
+		return "", fmt.Errorf("worker registry is not configured on this server")
+	}
+
+	if meta, connected := r.registry.WorkerMetadata(name); connected {
+		if host := meta[workerconstants.MetaKeyPrivateIngressHost]; host != "" {
+			return host, nil
+		}
+	}
+
+	if rt, ok := r.registry.WorkerRuntimeType(name); ok && rt == runtimeTypes.RuntimeTypeOpenShift.String() {
+		return "", fmt.Errorf("worker %q did not report its Caddy route host; re-join it", name)
+	}
+
+	suffix, err := r.DomainSuffix(name)
+	if err != nil {
+		return "", err
+	}
+
+	return name + "." + suffix, nil
 }
 
 // PrivateIngressPort returns the private ingress port the named worker reported, or proxy.DefaultPrivateIngressPort if unset.
