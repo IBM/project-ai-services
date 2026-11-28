@@ -22,6 +22,16 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       automountServiceAccountToken: false
+      {{- if .Values.authCatalogHostAliases }}
+      hostAliases:
+      {{- range .Values.authCatalogHostAliases }}
+      - ip: "{{ or .IP .ip }}"
+        hostnames:
+        {{- range or .Hostnames .hostnames }}
+          - "{{ . }}"
+        {{- end }}
+      {{- end }}
+      {{- end }}
       initContainers:
         - name: digitize-db-wait
           image: "{{ .Values.postgres.image }}"
@@ -134,6 +144,13 @@ spec:
               value: "{{ .Values.digitize.numShards }}"
             - name: LOG_LEVEL
               value: "{{ .Values.digitize.log_level }}"
+            # AUTH_JWKS_URL and AUTH_JWKS_PLAINTEXT_HOSTS come from the shared catalog-auth secret.
+            - name: AUTH_AUDIENCE
+              value: "{{ .Values.authAudience }}"
+            {{- if .Values.authCatalogCaBundleSecret }}
+            - name: AUTH_CATALOG_CA_BUNDLE
+              value: "/etc/ssl/certs/catalog-ca-bundle.crt"
+            {{- end }}
             {{- if .Values.llm.apiKey }}
             - name: LLM_API_KEY
               valueFrom:
@@ -149,6 +166,9 @@ spec:
               value: "4"
             - name: OPENBLAS_NUM_THREADS
               value: "1"
+          envFrom:
+            - secretRef:
+                name: "catalog-auth"
           ports:
             - containerPort: 4000
               protocol: TCP
@@ -162,7 +182,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 4000
             initialDelaySeconds: 10
             periodSeconds: 30
@@ -178,6 +198,12 @@ spec:
           volumeMounts:
             - mountPath: /var/cache
               name: cache
+            {{- if .Values.authCatalogCaBundleSecret }}
+            - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
+              subPath: ca-bundle.crt
+              name: ca-bundle
+              readOnly: true
+            {{- end }}
         {{- if .Values.mcp.enabled }}
         # No readinessProbe: a pod is only Ready when every container is, so a
         # failing sidecar would pull digitize-api out of the Service endpoints
@@ -217,3 +243,8 @@ spec:
         - name: cache
           persistentVolumeClaim:
             claimName: digitize-cache
+        {{- if .Values.authCatalogCaBundleSecret }}
+        - name: ca-bundle
+          secret:
+            secretName: {{ .Values.authCatalogCaBundleSecret | quote }}
+        {{- end }}

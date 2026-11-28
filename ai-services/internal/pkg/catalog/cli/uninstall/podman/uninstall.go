@@ -68,6 +68,9 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 	logger.Infof("Using base directory for cleanup: %s\n", baseDir)
 
 	secretsToDelete, secretsToSkip := podmanutils.FetchSecretsToDelete(pods)
+	// The local worker's shared catalog auth secret carries no pod label. It is rebuilt on every
+	// deploy, so it is always removed, even with --skip-cleanup.
+	secretsToDelete = append(secretsToDelete, constants.CatalogAuthSecret)
 
 	volumesToDelete, volumesToSkip := podmanutils.FetchVolumesToDelete(pods)
 

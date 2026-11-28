@@ -129,6 +129,124 @@ class TestSearchOnly:
         assert len(filtered_docs) == 1
         assert filtered_docs[0]["page_content"] == "keep"
 
+@pytest.mark.unit
+class TestSearchOnlyServiceToken:
+    """search_only sends a catalog-issued token to similarity (DA2) and fails closed."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_client(self):
+        from common.auth.service_token import reset_service_token_client
+        reset_service_token_client()
+        yield
+        reset_service_token_client()
+
+    def _setup(self, monkeypatch):
+        mock_settings = Mock()
+        mock_settings.chatbot.score_threshold = 0.0
+        mock_settings.chatbot.search_mode = "hybrid"
+        mock_settings.chatbot.rerank = True
+        mock_settings.chatbot.similarity_service_url = "http://similarity:7000"
+        monkeypatch.setattr("chatbot.backend_utils.settings", mock_settings)
+
+        response = Mock()
+        response.json.return_value = {"score_type": "relevance", "results": []}
+        response.raise_for_status = Mock()
+        response.headers = {}
+        post = Mock(return_value=response)
+        session = Mock()
+        session.post = post
+        monkeypatch.setattr("chatbot.backend_utils.get_similarity_session", lambda: session)
+        return post
+
+    @staticmethod
+    def _install(token=None, error=None):
+        from common.auth.service_token import ServiceTokenClient, ServiceCredentialConfig, set_service_token_client
+
+        calls = []
+
+        def exchanger(config, audience):
+            calls.append(audience)
+            if error:
+                raise error
+            import time
+            return token, time.time() + 900
+
+        config = ServiceCredentialConfig(catalog_url="https://catalog.example", credential_file="/unused")
+        set_service_token_client(ServiceTokenClient(config, exchanger))
+        return calls
+
+    def test_sends_bearer_token_for_the_similarity_audience(self, monkeypatch):
+        from chatbot import backend_utils
+
+        post = self._setup(monkeypatch)
+        calls = self._install(token="a.b.c")
+
+        backend_utils.search_only("q", top_k=10, top_r=5)
+
+        assert post.call_args[1]["headers"] == {"Authorization": "Bearer a.b.c"}
+        assert calls == ["similarity"]
+
+    def test_token_is_reused_across_calls(self, monkeypatch):
+        from chatbot import backend_utils
+
+        self._setup(monkeypatch)
+        calls = self._install(token="a.b.c")
+
+        backend_utils.search_only("q", top_k=10, top_r=5)
+        backend_utils.search_only("q", top_k=10, top_r=5)
+
+        assert calls == ["similarity"]
+
+    def test_no_credential_configured_sends_no_authorization_header(self, monkeypatch):
+        """Old deployments keep working against an open similarity service."""
+        from chatbot import backend_utils
+
+        post = self._setup(monkeypatch)
+        monkeypatch.delenv("AUTH_SERVICE_CREDENTIAL_FILE", raising=False)
+
+        backend_utils.search_only("q", top_k=10, top_r=5)
+
+        assert post.called
+        assert "Authorization" not in post.call_args[1]["headers"]
+
+    def test_configured_but_token_unavailable_sends_no_request(self, monkeypatch):
+        from chatbot import backend_utils
+        from common.auth import ServiceTokenUnavailable
+
+        post = self._setup(monkeypatch)
+        self._install(error=ServiceTokenUnavailable("catalog down"))
+
+        with pytest.raises(RuntimeError, match="Similarity service unavailable"):
+            backend_utils.search_only("q", top_k=10, top_r=5)
+
+        assert not post.called
+
+    def test_unsafe_auth_configuration_sends_no_request(self, monkeypatch):
+        from chatbot import backend_utils
+
+        post = self._setup(monkeypatch)
+        monkeypatch.setenv("AUTH_SERVICE_CREDENTIAL_FILE", "/etc/secret/credential")
+        monkeypatch.delenv("AUTH_CATALOG_API_URL", raising=False)
+
+        with pytest.raises(RuntimeError, match="Similarity service unavailable"):
+            backend_utils.search_only("q", top_k=10, top_r=5)
+
+        assert not post.called
+
+    def test_error_does_not_carry_the_credential(self, monkeypatch):
+        from chatbot import backend_utils
+        from common.auth import ServiceTokenUnavailable
+
+        self._setup(monkeypatch)
+        self._install(error=ServiceTokenUnavailable("catalog down"))
+
+        with pytest.raises(RuntimeError) as exc:
+            backend_utils.search_only("q", top_k=10, top_r=5)
+
+        assert "Bearer" not in str(exc.value)
+
+
+
 
 @pytest.mark.unit
 class TestValidateQueryLength:

@@ -3,6 +3,7 @@ import { ThemeProvider } from "./contexts/ThemeProvider";
 import MainLayout from "./layouts/MainLayout";
 import JobMonitorPage from "./pages/JobMonitorPage";
 import DocumentListPage from "./pages/DocumentListPage";
+import AuthCallbackPage from "./pages/AuthCallback";
 
 function App() {
   return (
@@ -15,6 +16,8 @@ function App() {
             <Route path="/jobs" element={<JobMonitorPage />} />
             <Route path="/documents" element={<DocumentListPage />} />
           </Route>
+
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
         </Routes>
       </BrowserRouter>
     </ThemeProvider>

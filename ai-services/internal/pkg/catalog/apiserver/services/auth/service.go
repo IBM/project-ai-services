@@ -88,12 +88,17 @@ func (s *service) LoginWithToken(ctx context.Context, miqToken string) (string, 
 
 	// Seed the in-memory user repo so /auth/me works after token exchange.
 	// ID must match the JWT subject (info.ExternalID) so GetByID resolves correctly.
+	// The IDP is set here by the server. A ManageIQ identity that collides with a
+	// protected user (the bootstrap admin) is refused and gets no catalog token.
 	if repo, ok := s.users.(*repository.InMemoryUserRepo); ok {
-		repo.Upsert(&models.User{
+		if err := repo.Upsert(&models.User{
 			ID:       info.ExternalID,
 			UserName: info.UserName,
 			Name:     info.FullName,
-		})
+			IDP:      IDPMIQ,
+		}); err != nil {
+			return "", "", err
+		}
 	}
 
 	access, _, err := s.tokens.GenerateAccessToken(info.ExternalID)

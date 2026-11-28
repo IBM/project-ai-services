@@ -7,8 +7,10 @@ import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.openapi.docs import get_swagger_ui_html
+from common.auth import AuthConfigError, AuthMiddleware, get_verifier, require_role
+from common.auth.openapi import add_bearer_auth_to_openapi
 from common.error_utils import APIError, ErrorCode, http_exception_handler
 from common.misc_utils import configure_uvicorn_logging, create_llm_session, get_llm_endpoint, get_logger, set_log_level, set_request_id
 from common.diagnostic_logger import setup_comprehensive_crash_handler
@@ -80,7 +82,16 @@ async def lifespan(app: FastAPI):
     Sets up logging, connection pooling, model initializations, database tables,
     cache directories, and initiates recovering zombie jobs.
     """
-    configure_uvicorn_logging(settings.common.app.log_level, ["/health"])
+    # Fail closed: refuse to start without a complete, safe auth configuration. This runs
+    # before anything touches the LLM, the database or the job files. The catalog need not be
+    # reachable yet; /ready reports that.
+    try:
+        get_verifier()
+    except AuthConfigError as exc:
+        logger.error(f"Startup aborted, authentication is not configured: {exc}")
+        raise
+
+    configure_uvicorn_logging(settings.common.app.log_level, ["/health", "/ready"])
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
     initialize_models()
     calculate_prompt_overhead_tokens(llm_model_dict.get("llm_endpoint", ""))
@@ -124,6 +135,10 @@ app = FastAPI(
     ),
     version="1.0.0",
     openapi_tags=tags_metadata,
+    # Swagger UI at /docs is public (see AuthMiddleware); "/" below serves it behind auth.
+    docs_url="/docs",
+    swagger_ui_oauth2_redirect_url=None,
+    redoc_url=None,
 )
 
 
@@ -141,7 +156,13 @@ async def add_request_id(request: Request, call_next):
     return response
 
 
-@app.get("/", include_in_schema=False)
+# Added last, so it is the outermost layer: every request is authenticated (deny by
+# default) before any other middleware or route code runs, and before a body is read.
+app.add_middleware(AuthMiddleware)
+add_bearer_auth_to_openapi(app, service="extract")
+
+
+@app.get("/", include_in_schema=False, dependencies=[Depends(require_role("admin"))])
 def swagger_root():
     """Expose Swagger UI at the root path (/)."""
     return get_swagger_ui_html(
@@ -154,6 +175,25 @@ def swagger_root():
 def health():
     """Perform a basic health check indicating the service is running."""
     return {"status": "ok"}
+
+
+@app.get(
+    "/ready",
+    tags=["health"],
+    summary="Readiness check",
+    description="Returns 200 when the service can verify tokens, that is, the JWKS keys are available.",
+)
+async def readiness_check():
+    """Perform a readiness check requiring one JWKS fetch."""
+    try:
+        await get_verifier().jwks.check()
+    except Exception as exc:
+        logger.error(f"Readiness check failed, JWKS is unavailable: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="JWKS is unavailable",
+        )
+    return {"status": "ready"}
 
 
 @app.exception_handler(HTTPException)

@@ -270,6 +270,31 @@ func (c *Client) RefreshToken(ctx context.Context) error {
 	return config.Save(c.creds)
 }
 
+// ServiceTokenResponse is the response of POST /api/v1/auth/service-token.
+type ServiceTokenResponse struct {
+	Token     string `json:"token"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// ServiceToken calls POST /api/v1/auth/service-token and returns a short-lived token for one service.
+func (c *Client) ServiceToken(ctx context.Context, service string) (ServiceTokenResponse, error) {
+	var resp ServiceTokenResponse
+	httpResp, err := c.httpClient.R().
+		SetContext(ctx).
+		SetBody(map[string]string{"service": service}).
+		SetResult(&resp).
+		Post("/api/v1/auth/service-token")
+	if err != nil {
+		return ServiceTokenResponse{}, fmt.Errorf("service token request: %w", err)
+	}
+
+	if httpResp.IsError() {
+		return ServiceTokenResponse{}, fmt.Errorf("service token failed: %s", httpErrorMessage(httpResp))
+	}
+
+	return resp, nil
+}
+
 // Me calls GET /api/v1/auth/me and returns the current user info.
 func (c *Client) Me(ctx context.Context) (UserInfo, error) {
 	var info UserInfo
@@ -350,3 +375,20 @@ func jwtExpiry(token string) (time.Time, error) {
 }
 
 // Made with Bob
+
+// ServiceTokenForLoggedInUser returns a short-lived token for one service, issued to the user
+// who ran `catalog login`. The CLI uses it to call a service API directly (for example the
+// digitize export and import used by `application backup` and `restore`).
+func ServiceTokenForLoggedInUser(ctx context.Context, service string) (string, error) {
+	c, err := New(ctx)
+	if err != nil {
+		return "", fmt.Errorf("a catalog login is required to call the %s API (run `ai-services catalog login`): %w", service, err)
+	}
+
+	resp, err := c.ServiceToken(ctx, service)
+	if err != nil {
+		return "", fmt.Errorf("get %s token: %w", service, err)
+	}
+
+	return resp.Token, nil
+}

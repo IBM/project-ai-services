@@ -16,7 +16,14 @@ const (
 	// serviceMaxRetries is the number of retries on failure (one retry = two total attempts).
 	serviceMaxRetries  = 1
 	serviceConnectPath = "/v1/connectors"
+	// connectorServiceAudience is the token audience of the service that owns /v1/connectors.
+	connectorServiceAudience = "digitize"
 )
+
+// InternalTokenProvider returns a token the catalog uses to call a service itself.
+type InternalTokenProvider interface {
+	InternalToken(ctx context.Context, service string) (string, error)
+}
 
 // serviceConnectorListResponse is the paginated envelope returned by
 // GET /v1/connectors on the downstream service pod.
@@ -59,12 +66,15 @@ type serviceUpdatePayload struct {
 type ServiceClient struct {
 	proxy   httpproxy.HTTPProxier
 	baseURL string
+	tokens  InternalTokenProvider
 }
 
 // NewServiceClient creates a ServiceClient that routes all calls through proxy
-// to the given baseURL.
-func NewServiceClient(proxy httpproxy.HTTPProxier, baseURL string) *ServiceClient {
-	return &ServiceClient{proxy: proxy, baseURL: baseURL}
+// to the given baseURL. Every request carries a catalog-issued token from tokens
+// (Authorization: Bearer). A nil tokens sends no Authorization header, which only a
+// service that does not enforce authentication accepts.
+func NewServiceClient(proxy httpproxy.HTTPProxier, baseURL string, tokens InternalTokenProvider) *ServiceClient {
+	return &ServiceClient{proxy: proxy, baseURL: baseURL, tokens: tokens}
 }
 
 // do executes a single HTTP request via HTTPProxy and returns the raw response.
@@ -72,6 +82,17 @@ func (c *ServiceClient) do(ctx context.Context, method, path string, body []byte
 	headers := map[string]string(nil)
 	if len(body) > 0 {
 		headers = map[string]string{"Content-Type": "application/json"}
+	}
+
+	if c.tokens != nil {
+		token, tokErr := c.tokens.InternalToken(ctx, connectorServiceAudience)
+		if tokErr != nil {
+			return 0, nil, fmt.Errorf("get service token: %w", tokErr)
+		}
+		if headers == nil {
+			headers = map[string]string{}
+		}
+		headers["Authorization"] = "Bearer " + token
 	}
 
 	resp, err := c.proxy.HTTPProxy(ctx, method, c.baseURL+path, headers, body)

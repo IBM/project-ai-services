@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,10 +13,13 @@ import (
 	"strings"
 	"time"
 
-	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
-	catalogConfig "github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/tests/e2e/common"
 )
+
+// judgeService is empty: the judge is a plain vLLM container outside the auth model and gets no
+// catalog token.
+const judgeService = ""
 
 // RAG transport tuning constants — values are explained in sharedRAGClient below.
 const (
@@ -110,9 +112,13 @@ func WaitForRAGBackendReady(ctx context.Context, ragBaseURL string, pollInterval
 
 	return waitForEndpointReady(ctx, similarityHealthClient, modelsURL, pollInterval,
 		func(req *http.Request) {
-			if token := loadFreshBearerToken(); token != "" {
-				req.Header.Set("Authorization", "Bearer "+token)
+			token, err := common.ServiceToken(ctx, common.ServiceChat)
+			if err != nil {
+				logger.Warningf("[RAG] %v", err)
+
+				return
 			}
+			req.Header.Set("Authorization", "Bearer "+token)
 		},
 		func(attempt int) {
 			logger.Infof("[RAG] LLM is ready — chat-bot /v1/models returned 200 after %d attempt(s)", attempt)
@@ -148,11 +154,6 @@ func WaitForSimilarityAPIReady(ctx context.Context, similarityBaseURL string, po
 			return fmt.Errorf("timed out waiting for similarity-api at %s after %d attempt(s): %w", url, attempt, ctx.Err())
 		},
 	)
-}
-
-// catalogClientNew wraps catalogClient.New() as a variable to allow test overrides and avoid import cycles.
-var catalogClientNew = func() (interface{ AccessToken() string }, error) {
-	return catalogClient.New(context.Background())
 }
 
 const (
@@ -246,7 +247,7 @@ func AskRAG(ctx context.Context, baseURL string, question string) (string, error
 		"temperature": 0,
 	}
 
-	raw, err := PostJSON(ctx, baseURL, "/v1/chat/completions", req)
+	raw, err := PostJSON(ctx, common.ServiceChat, baseURL, "/v1/chat/completions", req)
 	if err != nil {
 		return "", err
 	}
@@ -283,7 +284,7 @@ func AskJudge(
 		"temperature": 0,
 	}
 
-	raw, err := PostJSON(ctx, judgeBaseURL, "/v1/chat/completions", req)
+	raw, err := PostJSON(ctx, judgeService, judgeBaseURL, "/v1/chat/completions", req)
 	if err != nil {
 		return "", err
 	}
@@ -291,62 +292,9 @@ func AskJudge(
 	return extractAssistantContent(raw)
 }
 
-// loadFreshBearerToken returns the catalog access token, auto-refreshing if expired.
-func loadFreshBearerToken() string {
-	creds, err := catalogConfig.Load()
-	if err != nil {
-		logger.Warningf("[RAG] could not load catalog credentials: %v", err)
-
-		return ""
-	}
-
-	if creds.AccessToken == "" {
-		logger.Warningf("[RAG] catalog credentials loaded but access token is empty")
-
-		return ""
-	}
-
-	const refreshSkew = 30 * time.Second
-	exp, jwtErr := jwtTokenExpiry(creds.AccessToken)
-	if jwtErr != nil || time.Until(exp) < refreshSkew {
-		catalogClient, clientErr := catalogClientNew()
-		if clientErr != nil {
-			logger.Warningf("[RAG] could not refresh catalog token: %v", clientErr)
-
-			return creds.AccessToken
-		}
-
-		return catalogClient.AccessToken()
-	}
-
-	return creds.AccessToken
-}
-
-// jwtTokenExpiry decodes the exp claim from a JWT without verifying the signature.
-func jwtTokenExpiry(token string) (time.Time, error) {
-	const jwtPartCount = 3
-	parts := strings.Split(token, ".")
-	if len(parts) != jwtPartCount {
-		return time.Time{}, fmt.Errorf("malformed JWT")
-	}
-
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return time.Time{}, err
-	}
-
-	var claims struct {
-		Exp int64 `json:"exp"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil || claims.Exp == 0 {
-		return time.Time{}, fmt.Errorf("no exp claim")
-	}
-
-	return time.Unix(claims.Exp, 0), nil
-}
-
-// buildPostJSONRequest marshals body into an *http.Request with Content-Type and Bearer token.
-func buildPostJSONRequest(ctx context.Context, baseURL, path string, body map[string]any) (*http.Request, error) {
+// buildPostJSONRequest marshals body into an *http.Request with Content-Type and, unless service is
+// empty, a Bearer token issued for that service.
+func buildPostJSONRequest(ctx context.Context, service, baseURL, path string, body map[string]any) (*http.Request, error) {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request body: %w", err)
@@ -359,8 +307,13 @@ func buildPostJSONRequest(ctx context.Context, baseURL, path string, body map[st
 
 	req.Header.Set("Content-Type", "application/json")
 
-	if token := loadFreshBearerToken(); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	if service != "" {
+		token, err := common.ServiceToken(ctx, service)
+		if err != nil {
+			logger.Warningf("[RAG] %v", err)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 	}
 
 	return req, nil
@@ -390,13 +343,15 @@ func handlePostJSONResponse(resp *http.Response) (string, error) {
 }
 
 // PostJSON sends a JSON POST request using the shared HTTP client and returns the response body.
+// service is the catalog service whose token is sent. Pass an empty string to send no token.
 func PostJSON(
 	ctx context.Context,
+	service string,
 	baseURL string,
 	path string,
 	body map[string]any,
 ) (string, error) {
-	req, err := buildPostJSONRequest(ctx, baseURL, path, body)
+	req, err := buildPostJSONRequest(ctx, service, baseURL, path, body)
 	if err != nil {
 		return "", err
 	}

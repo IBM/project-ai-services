@@ -1,5 +1,7 @@
 name: chat
 version: "1.0.0"
+podTemplateExecutions:
+  - [chat-bot.yaml.tmpl]
 
 # Resource requirements (UI + Backend)
 resources:

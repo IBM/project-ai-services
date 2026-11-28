@@ -14,7 +14,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from common.auth import require_role
 from fastapi.responses import JSONResponse, Response
 from common.error_utils import APIError, ErrorCode, http_error_responses
 from common.misc_utils import cleanup_staging_directory, get_llm_endpoint, get_logger
@@ -100,6 +101,7 @@ def _resolve_schema_name(schema_name: str):
 
 @router.post(
     "",
+    dependencies=[Depends(require_role("write"))],
     response_model=ExtractionResponse,
     status_code=200,
     tags=["extraction", "MCP"],
@@ -305,6 +307,7 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
 
 @router.post(
     "/jobs",
+    dependencies=[Depends(require_role("write"))],
     status_code=202,
     response_model=JobCreatedResponse,
     responses={
@@ -584,6 +587,7 @@ async def create_extract_job(
 
 @router.get(
     "/jobs",
+    dependencies=[Depends(require_role("read"))],
     response_model=JobsListResponse,
     responses={
         200: {"description": "Paginated job list"},
@@ -654,6 +658,7 @@ async def list_extract_jobs(
 
 @router.get(
     "/jobs/{job_id}",
+    dependencies=[Depends(require_role("read"))],
     response_model=JobDetailResponse,
     responses={
         200: {"description": "Job details"},
@@ -731,6 +736,7 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
 
 @router.get(
     "/jobs/{job_id}/results/{doc_id}",
+    dependencies=[Depends(require_role("read"))],
     response_model=JobResultResponse,
     responses={
         200: {"description": "Extraction result for this document"},
@@ -814,6 +820,7 @@ async def get_document_result(job_id: str, doc_id: str):
 
 @router.get(
     "/jobs/{job_id}/results/{doc_id}/download",
+    dependencies=[Depends(require_role("read"))],
     responses={
         200: {"description": "Result JSON file download"},
         404: http_error_responses[404],
@@ -886,6 +893,7 @@ async def download_document_result(job_id: str, doc_id: str):
 
 @router.delete(
     "/jobs/{job_id}",
+    dependencies=[Depends(require_role("write"))],
     status_code=204,
     responses={
         204: {"description": "Job and result deleted"},
@@ -931,6 +939,7 @@ async def delete_extract_job(job_id: str) -> Response:
 
 @router.delete(
     "/jobs",
+    dependencies=[Depends(require_role("admin"))],
     status_code=204,
     responses={
         204: {"description": "All jobs and results deleted"},

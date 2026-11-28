@@ -7,6 +7,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -82,6 +83,9 @@ func PerformCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, s
 	}
 
 	secretsToDelete, secretsToSkip := podmanutils.FetchSecretsToDelete(pods)
+	// The shared catalog auth secret is created at deploy time and carries no pod label. It is
+	// rebuilt on every deploy, so it is always removed, even with --skip-cleanup.
+	secretsToDelete = append(secretsToDelete, constants.CatalogAuthSecret)
 	volumesToDelete, volumesToSkip := podmanutils.FetchVolumesToDelete(pods)
 
 	logger.InfofCtx(ctx, "Using base directory for cleanup: %s\n", baseDir)

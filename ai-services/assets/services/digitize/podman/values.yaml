@@ -16,3 +16,6 @@ postgres:
 mcp:
   image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.10
   port: "4002"
+
+# The catalog addresses come from the shared "catalog-auth" secret created at deploy time.
+authAudience: "digitize"

@@ -92,6 +92,50 @@ func TestLoginWithToken_MIQClientError(t *testing.T) {
 	assert.EqualError(t, err, "connection refused")
 }
 
+// A ManageIQ identity whose external ID or user name matches the bootstrap admin must be
+// refused and must not replace the admin (design doc, risk 1).
+func TestLoginWithToken_CannotReplaceBootstrapAdmin(t *testing.T) {
+	cases := map[string]*miq.UserInfo{
+		"same external id": {ExternalID: "uid_1", UserName: "mallory", FullName: "M"},
+		"same user name":   {ExternalID: "ext-77", UserName: "admin", FullName: "M"},
+	}
+	for name, info := range cases {
+		t.Run(name, func(t *testing.T) {
+			tokenMgr := auth.NewTokenManager("test-secret-32-bytes-long-enough!", 15*60*1000000000, 24*3600*1000000000)
+			users := repository.NewInMemoryUserRepoWithAdminHash("uid_1", "admin", "Admin", "orig-hash")
+			svc := auth.NewAuthServiceWithMIQ(users, tokenMgr, &repository.NoopTokenBlacklist{}, &stubMIQClient{info: info})
+
+			access, refresh, err := svc.LoginWithToken(context.Background(), "tok")
+
+			assert.ErrorIs(t, err, repository.ErrReservedIdentity)
+			assert.Empty(t, access)
+			assert.Empty(t, refresh)
+
+			admin, err := users.GetByID(context.Background(), "uid_1")
+			require.NoError(t, err)
+			assert.Equal(t, "admin", admin.UserName)
+			assert.Equal(t, "orig-hash", admin.PasswordHash)
+			assert.Equal(t, auth.IDPLocal, admin.IDP)
+			byName, err := users.GetByUserName(context.Background(), "admin")
+			require.NoError(t, err)
+			assert.Equal(t, "uid_1", byName.ID)
+		})
+	}
+}
+
+func TestLoginWithToken_SetsMIQIDPOnSeededUser(t *testing.T) {
+	stub := &stubMIQClient{info: &miq.UserInfo{ExternalID: "42", UserName: "operator1", FullName: "Op"}}
+	tokenMgr := auth.NewTokenManager("test-secret-32-bytes-long-enough!", 15*60*1000000000, 24*3600*1000000000)
+	users := repository.NewInMemoryUserRepo()
+	svc := auth.NewAuthServiceWithMIQ(users, tokenMgr, &repository.NoopTokenBlacklist{}, stub)
+
+	_, _, err := svc.LoginWithToken(context.Background(), "t")
+	require.NoError(t, err)
+	u, err := svc.GetUser(context.Background(), "42")
+	require.NoError(t, err)
+	assert.Equal(t, auth.IDPMIQ, u.IDP)
+}
+
 func TestLoginWithToken_UserSeededInRepo(t *testing.T) {
 	stub := &stubMIQClient{
 		info: &miq.UserInfo{

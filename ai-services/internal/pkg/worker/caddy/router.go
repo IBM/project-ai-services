@@ -89,11 +89,17 @@ func (pr *ProxyRouter) ManageProxyRoute(ctx context.Context, op payload.ProxyRou
 // managePrivateRoute registers a route on the private mTLS ingress or egress server.
 func (pr *ProxyRouter) managePrivateRoute(ctx context.Context, op payload.ProxyRouteOp, route payload.Route) error {
 	if op == payload.ProxyRouteOpRegisterIngress {
+		rules := make([]proxy.RouteRule, 0, len(route.AllowedRules))
+		for _, r := range route.AllowedRules {
+			rules = append(rules, proxy.RouteRule{Method: r.Method, Path: r.Path})
+		}
+
 		return pr.pm.RegisterIngressRoute(ctx, proxy.IngressRoute{
-			ID:         route.ID,
-			PathPrefix: route.PathPrefix,
-			Upstream:   route.Upstream,
-			Terminal:   route.Terminal,
+			ID:           route.ID,
+			PathPrefix:   route.PathPrefix,
+			Upstream:     route.Upstream,
+			Terminal:     route.Terminal,
+			AllowedRules: rules,
 		})
 	}
 

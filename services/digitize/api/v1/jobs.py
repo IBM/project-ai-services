@@ -231,7 +231,7 @@ async def create_job(
                 if first_filename is None or first_filename == filename:
                     logger.info(
                         f"Job {job_id}: Duplicate file '{filename}' (hash={file_hash[:20]}...) "
-                        f"already submitted in this batch — silently dropping"
+                        "already submitted in this batch — silently dropping"
                     )
                 else:
                     logger.info(
@@ -295,7 +295,7 @@ async def create_job(
             logger.warning(
                 f"All {len(completed_summaries) + len(in_progress_summaries)} submitted file(s) already exist "
                 f"({len(completed_summaries)} completed, {len(in_progress_summaries)} in progress). "
-                f"No job created."
+                "No job created."
             )
             APIError.raise_error(ErrorCode.RESOURCE_LOCKED, " ".join(message_parts))
 
@@ -338,7 +338,7 @@ async def create_job(
         raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error in create_job: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Unexpected error creating job: {exc}")
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Unexpected error creating job")
 
 
 @router.get(
@@ -381,7 +381,7 @@ async def list_jobs(
         raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Failed to retrieve jobs: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to retrieve jobs: {exc}")
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to retrieve jobs")
 
 
 @router.get(

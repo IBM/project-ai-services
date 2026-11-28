@@ -30,6 +30,9 @@ type Runtime interface {
 	ListSecrets(ctx context.Context, filters map[string][]string) ([]string, error)
 	DeleteSecret(ctx context.Context, name string) error
 	SecretExists(ctx context.Context, nameOrID string) (bool, error)
+	// CreateSecret creates the secret, or replaces it when it already exists. labels are set
+	// on the secret so that label-based cleanup finds it.
+	CreateSecret(ctx context.Context, name string, data map[string][]byte, labels map[string]string) error
 	UpdateSecret(ctx context.Context, name, deploymentName string, data map[string][]byte) error
 
 	// Volume operations

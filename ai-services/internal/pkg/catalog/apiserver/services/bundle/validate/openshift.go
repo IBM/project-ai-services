@@ -66,6 +66,10 @@ func (v *OpenShiftBundleValidator) Validate(archiveBytes []byte, topDir, rootVer
 		return err
 	}
 
+	if err := rejectCredentialAnnotation(found.valuesBytes, "openshift/values.yaml"); err != nil {
+		return err
+	}
+
 	if err := validateValuesSchema(found.schemaBytes, "openshift/values.schema.json"); err != nil {
 		return err
 	}
@@ -95,6 +99,7 @@ type openShiftPaths struct {
 	hasChart       bool
 	hasValues      bool
 	hasTemplFile   bool
+	valuesBytes    []byte                  // raw content of openshift/values.yaml
 	metadataBytes  []byte                  // raw content of openshift/metadata.yaml
 	schemaBytes    []byte                  // raw content of openshift/values.schema.json; non-nil means present
 	bufferedFiles  []*archive.BufferedFile // all openshift/ files, for loader.LoadFiles
@@ -136,6 +141,7 @@ func (found *openShiftPaths) recordEntry(sub string, hdr *tar.Header, content []
 		found.hasChart = true
 	case sub == "values.yaml":
 		found.hasValues = true
+		found.valuesBytes = content
 	case sub == "values.schema.json":
 		found.schemaBytes = content
 	case strings.HasPrefix(sub, "templates/") && strings.HasSuffix(sub, ".yaml"):

@@ -4,6 +4,9 @@ metadata:
   name: "chat-bot-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
+    {{- if .Values.authServiceCredentialSecret }}
+    ai-services.io/secret: "{{ .Values.authServiceCredentialSecret }}"
+    {{- end }}
   annotations:
     ai-services.io/routes: "3000:chat-bot-ui-{{ .InstanceSlug }}:ui,5000:chat-bot-backend-{{ .InstanceSlug }}:api,5001:chat-bot-mcp-{{ .InstanceSlug }}:mcp"
     # ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"  # Uncomment to expose ports directly (bypasses Caddy)
@@ -13,6 +16,16 @@ spec:
     - name: opensearch-secret
       secret:
         secretName: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
+    {{- if .Values.authServiceCredentialSecret }}
+    - name: service-credential
+      secret:
+        secretName: "{{ .Values.authServiceCredentialSecret }}"
+    {{- end }}
+    {{- if .Values.llm.apiKey }}
+    - name: vllm-secret
+      secret:
+        secretName: "vllm-secret-{{ .Values.llm.instanceSlug }}"
+    {{- end }}
   containers:
     - name: ui
       image: "{{ .Values.ui.image }}"
@@ -26,6 +39,11 @@ spec:
           value: "chat-bot-{{ .InstanceSlug }}"
         - name: BACKEND_PORT
           value: "5000"
+      # Sign-in: the UI's Nginx trades the one-time code for a token at the catalog. CATALOG_API_URL
+      # and CATALOG_UI_URL come from the shared catalog-auth secret.
+      envFrom:
+        - secretRef:
+            name: "catalog-auth"
       ports:
         - containerPort: 3000
           protocol: TCP
@@ -46,6 +64,9 @@ spec:
         - |
           export OPENSEARCH_USERNAME=$(cat /etc/secret/opensearch-secret/username)
           export OPENSEARCH_PASSWORD=$(cat /etc/secret/opensearch-secret/password)
+          {{- if .Values.llm.apiKey }}
+          export LLM_API_KEY=$(cat /etc/secret/vllm-secret/apiKey)
+          {{- end }}
           exec /var/venv/bin/python -m uvicorn app:app \
             --host 0.0.0.0 \
             --port 5000 \
@@ -86,18 +107,39 @@ spec:
           value: "{{ .Values.backend.chatbot.rerank }}"
         - name: CHATBOT_SIMILARITY_SERVICE_URL
           value: "http://similarity-api-{{ .InstanceSlug }}:7000"
+        # Inbound auth: every route except /health, /ready and /openapi.json needs a catalog token.
+        # AUTH_JWKS_URL, AUTH_JWKS_PLAINTEXT_HOSTS and AUTH_CATALOG_API_URL come from the shared
+        # catalog-auth secret.
+        - name: AUTH_AUDIENCE
+          value: "{{ .Values.authAudience }}"
+        {{- if .Values.authServiceCredentialSecret }}
+        # Credential to obtain a similarity token from the catalog. Mounted from a Secret, never a literal value.
+        - name: AUTH_SERVICE_CREDENTIAL_FILE
+          value: "/etc/secret/service-credential/credential"
+        {{- end }}
         - name: CHATBOT_SYSTEM_PROMPT
           {{- if .Values.backend.systemPrompt }}
           value: "{{ .Values.backend.systemPrompt }}"
           {{- else }}
           value: ""
           {{ end }}
+      envFrom:
+        - secretRef:
+            name: "catalog-auth"
       ports:
         - containerPort: 5000
           protocol: TCP
       livenessProbe:
         httpGet:
           path: /health
+          port: 5000
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+      readinessProbe:
+        httpGet:
+          path: /ready
           port: 5000
         initialDelaySeconds: 10
         periodSeconds: 30
@@ -112,6 +154,16 @@ spec:
         - mountPath: /etc/secret/opensearch-secret
           name: opensearch-secret
           readOnly: true
+        {{- if .Values.authServiceCredentialSecret }}
+        - mountPath: /etc/secret/service-credential
+          name: service-credential
+          readOnly: true
+        {{- end }}
+        {{- if .Values.llm.apiKey }}
+        - mountPath: /etc/secret/vllm-secret
+          name: vllm-secret
+          readOnly: true
+        {{- end }}
     - name: mcp-sidecar
       image: "{{ .Values.mcp.image }}"
       args:

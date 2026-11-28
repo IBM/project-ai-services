@@ -1,4 +1,5 @@
-import axios, { AxiosResponse } from "axios";
+import axios, { AxiosResponse, InternalAxiosRequestConfig } from "axios";
+import { getServiceToken, isTokenExpiringSoon, startLoginFlow, clearServiceToken } from "./auth";
 
 // Use relative URL to leverage Vite's proxy configuration
 // This avoids CORS issues by routing through the dev server
@@ -10,6 +11,28 @@ const api = axios.create({
     "Content-Type": "application/json",
   },
 });
+
+api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
+  if (isTokenExpiringSoon()) {
+    startLoginFlow();
+  }
+  const token = getServiceToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response?.status === 401) {
+      clearServiceToken();
+      startLoginFlow();
+    }
+    return Promise.reject(error);
+  },
+);
 
 // Types
 export interface Document {

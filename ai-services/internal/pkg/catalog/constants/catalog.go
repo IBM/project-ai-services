@@ -132,6 +132,8 @@ const (
 	CatalogDeploymentName = "catalog-backend"
 	// CatalogAdminUser is the default admin username created during catalog configure.
 	CatalogAdminUser = "admin"
+	// CatalogAPIRouteID is the Caddy route ID (subdomain) of the catalog backend API.
+	CatalogAPIRouteID = "catalog-api"
 	// CatalogAPIRouteKey is the routeURLs map key for the catalog backend API URL,
 	// populated by caddy.RegisterCatalogRoutes during podman configure.
 	CatalogAPIRouteKey = "CATALOG_API_ROUTE"

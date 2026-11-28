@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/tests/e2e/common"
 )
 
 // Transport tuning constants for the shared similarity HTTP client.
@@ -51,6 +52,19 @@ func getHTTPClient(timeout time.Duration) *http.Client {
 		Timeout:   timeout,
 		Transport: sharedSimilarityTransport,
 	}
+}
+
+// setServiceToken adds a similarity service token to req. Without a catalog login the request goes
+// out unauthenticated, and the service answers 401, which the caller sees.
+func setServiceToken(ctx context.Context, req *http.Request) {
+	token, err := common.ServiceToken(ctx, common.ServiceSimilarity)
+	if err != nil {
+		logger.Warningf("[SIM] %v", err)
+
+		return
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
 }
 
 // drainAndClose drains and closes the body so the underlying TCP connection is returned to the pool.
@@ -121,6 +135,7 @@ func doPost(ctx context.Context, url string, payload any, timeout time.Duration)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	setServiceToken(ctx, req)
 
 	resp, err := getHTTPClient(timeout).Do(req)
 	if err != nil {
@@ -143,6 +158,8 @@ func doGet(ctx context.Context, url string, timeout time.Duration) ([]byte, int,
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("create request: %w", err)
 	}
+
+	setServiceToken(ctx, req)
 
 	resp, err := getHTTPClient(timeout).Do(req)
 	if err != nil {
@@ -285,6 +302,7 @@ func VerifyTimeInfoInResponse(ctx context.Context, baseURL string) error {
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
+	setServiceToken(ctx, httpReq)
 
 	resp, err := getHTTPClient(postCallTimeout).Do(httpReq)
 	if err != nil {

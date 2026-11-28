@@ -1,5 +1,7 @@
 name: similarity
 version: "1.0.0"
+podTemplateExecutions:
+  - [similarity-api.yaml.tmpl]
 
 # Resource requirements
 resources:

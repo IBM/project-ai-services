@@ -5,6 +5,7 @@ import AuthLayout from "./layouts/AuthLayout";
 
 import Login from "./pages/Login";
 import Logout from "./pages/Logout";
+import Authorize from "./pages/Authorize";
 import DigitalAssistantsPage from "./pages/DigitalAssistants";
 import Services from "./pages/Services";
 import Connectors from "./pages/Connectors";
@@ -53,6 +54,7 @@ function App() {
           </Route>
 
           <Route path={ROUTES.LOGOUT} element={<Logout />} />
+          <Route path={ROUTES.AUTHORIZE} element={<Authorize />} />
         </Routes>
       </SessionManager>
     </BrowserRouter>

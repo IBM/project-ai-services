@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BusEventType,
   ChatCustomElement,
@@ -8,8 +8,14 @@ import {
 } from '@carbon/ai-chat';
 import './App.scss';
 import { Column, Content, Grid, Theme } from '@carbon/react';
+import {
+  CALLBACK_PATH,
+  clearServiceToken,
+  isTokenExpiringSoon,
+  startLoginFlow,
+} from '../services/auth.js';
 import { AIExplanationCard } from './AIExplanationCard.jsx';
-import { ApiKeyDialog } from './ApiKeyDialog.jsx';
+import { AuthCallback } from './AuthCallback.jsx';
 import { customSendMessage } from './customSendMessage.jsx';
 import HeaderNav from './Header.jsx';
 import { renderUserDefinedResponse } from './renderUserDefinedResponse.jsx';
@@ -22,63 +28,35 @@ const layout = {
 };
 
 function App() {
-  const [apiKey, setApiKey] = useState(null);
-  const [showApiKeyDialog, setShowApiKeyDialog] = useState(false);
-  const [authRequired, setAuthRequired] = useState(null); // null = checking, true/false = determined
-  const [isReady, setIsReady] = useState(false);
+  // The token is held in memory by services/auth.js, never in storage, so a page load starts
+  // signed out and goes to the catalog. This state only says whether the chat may be shown.
+  const [isCallback, setIsCallback] = useState(
+    window.location.pathname === CALLBACK_PATH,
+  );
+  const [isSignedIn, setIsSignedIn] = useState(!isTokenExpiringSoon());
   const [conversationHistory, setConversationHistory] = useState([]);
   const chatInstanceRef = useRef(null);
 
   useEffect(() => {
-    // Check if authentication is required by probing the models endpoint
-    const checkAuthRequirement = async () => {
-      try {
-        const response = await fetch('/v1/models');
+    if (!isCallback && !isSignedIn) {
+      startLoginFlow();
+    }
+  }, [isCallback, isSignedIn]);
 
-        if (response.status === 401) {
-          setAuthRequired(true);
-          setShowApiKeyDialog(true);
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error(
-            `Unexpected status while checking auth requirement: ${response.status}`,
-          );
-        }
-
-        setAuthRequired(false);
-        setApiKey('not-needed');
-        setIsReady(true);
-      } catch (error) {
-        console.error('Error checking auth requirement:', error);
-        // On error, assume auth is required to be safe
-        setAuthRequired(true);
-        setShowApiKeyDialog(true);
-      }
-    };
-
-    checkAuthRequirement();
+  const handleCallbackDone = useCallback(() => {
+    setIsCallback(false);
+    setIsSignedIn(true);
   }, []);
 
-  const handleApiKeyValidated = (validatedKey) => {
-    setApiKey(validatedKey);
-    setShowApiKeyDialog(false);
-    setIsReady(true);
-  };
-
+  // Called after a 401 from the backend: the token is no longer accepted, sign in again.
   const handleAuthError = () => {
-    // Only handle auth errors if auth is actually required
-    if (authRequired) {
-      // Clear invalid API key and show dialog again
-      setApiKey(null);
-      setShowApiKeyDialog(true);
-      setIsReady(false);
-    }
+    clearServiceToken();
+    startLoginFlow();
   };
 
   const handleResetChat = () => {
-    // Perform a page refresh to start a new session
+    // Perform a page refresh to start a new session. This signs in again, which the catalog
+    // answers at once while its own session is still valid.
     window.location.reload();
   };
 
@@ -88,14 +66,13 @@ function App() {
     minimizeButtonIconType: undefined,
   };
 
-  // Create messaging object with API key and conversation history
+  // Create messaging object with the auth-error handler and conversation history
   const messaging = {
     customSendMessage: (request, options, instance) =>
       customSendMessage(
         request,
         options,
         instance,
-        apiKey,
         handleAuthError,
         conversationHistory,
         setConversationHistory,
@@ -140,12 +117,16 @@ function App() {
     }
   }
 
+  if (isCallback) {
+    return (
+      <Theme theme="white">
+        <AuthCallback onDone={handleCallbackDone} />
+      </Theme>
+    );
+  }
+
   return (
     <>
-      <ApiKeyDialog
-        isOpen={showApiKeyDialog}
-        onApiKeyValidated={handleApiKeyValidated}
-      />
       <Theme theme="white">
         <Content id="main-content">
           <Grid fullWidth className="chat-page-grid">
@@ -153,13 +134,13 @@ function App() {
               <Theme theme="g90">
                 <HeaderNav
                   onNewChat={handleResetChat}
-                  showNewChatButton={isReady && apiKey}
+                  showNewChatButton={isSignedIn}
                 />
               </Theme>
             </Column>
             <Column sm={4} md={8} lg={12}>
               <div className="chat-container">
-                {isReady && apiKey && (
+                {isSignedIn && (
                   <ChatCustomElement
                     className="fullScreen"
                     messaging={messaging}

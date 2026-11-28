@@ -30,6 +30,12 @@ type ProxyManager interface {
 	RegisterEgressRoute(ctx context.Context, route EgressRoute) error
 }
 
+// RouteRule defines an exact (method, path) rule on a private ingress route.
+type RouteRule struct {
+	Method string `json:"method"` // e.g. "GET", "POST"
+	Path   string `json:"path"`   // e.g. "/.well-known/jwks.json", "/api/v1/auth/code/exchange"
+}
+
 // IngressRoute is an inbound route on the private mTLS ingress server.
 type IngressRoute struct {
 	// ID is the unique identifier for the route (used as the Caddy @id)
@@ -43,6 +49,12 @@ type IngressRoute struct {
 
 	// Terminal indicates if route matching should stop after this route
 	Terminal bool
+
+	// AllowedRules specifies exact (method, path) rules allowed on this route.
+	// If non-empty, only requests matching both the HTTP method and the relative path under PathPrefix
+	// are accepted; any other request under PathPrefix returns 404.
+	// If empty, all requests matching PathPrefix and PathPrefix/* are forwarded (standard prefix matching).
+	AllowedRules []RouteRule
 }
 
 // EgressRoute is an outbound route on the private egress server: plain HTTP in,

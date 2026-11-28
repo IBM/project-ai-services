@@ -112,10 +112,6 @@ class TestQueryRephrasingIntegration:
         mock_vllm = Mock(return_value={"choices": [{"message": {"content": "Response"}}]})
         monkeypatch.setattr("chatbot.app.query_vllm_non_stream", mock_vllm)
         
-        # Mock is_auth_required to return False
-        mock_is_auth = AsyncMock(return_value=False)
-        monkeypatch.setattr("chatbot.app.is_auth_required", mock_is_auth)
-        
         # Mock settings
         mock_settings = Mock()
         mock_settings.chatbot.num_chunks_post_search = 10
@@ -185,10 +181,6 @@ class TestQueryRephrasingIntegration:
         mock_vllm = Mock(return_value={"choices": [{"message": {"content": "Antwort"}}]})
         monkeypatch.setattr("chatbot.app.query_vllm_non_stream", mock_vllm)
         
-        # Mock is_auth_required to return False
-        mock_is_auth = AsyncMock(return_value=False)
-        monkeypatch.setattr("chatbot.app.is_auth_required", mock_is_auth)
-        
         # Mock settings
         mock_settings = Mock()
         mock_settings.chatbot.num_chunks_post_search = 10
@@ -255,10 +247,6 @@ class TestQueryRephrasingIntegration:
         mock_vllm = Mock(return_value={"choices": [{"message": {"content": "Response"}}]})
         monkeypatch.setattr("chatbot.app.query_vllm_non_stream", mock_vllm)
         
-        # Mock is_auth_required to return False
-        mock_is_auth = AsyncMock(return_value=False)
-        monkeypatch.setattr("chatbot.app.is_auth_required", mock_is_auth)
-        
         # Mock settings
         mock_settings = Mock()
         mock_settings.chatbot.num_chunks_post_search = 10
@@ -313,10 +301,6 @@ class TestQueryRephrasingIntegration:
         
         mock_vllm = Mock(return_value={"choices": [{"message": {"content": "Response"}}]})
         monkeypatch.setattr("chatbot.app.query_vllm_non_stream", mock_vllm)
-        
-        # Mock is_auth_required to return False
-        mock_is_auth = AsyncMock(return_value=False)
-        monkeypatch.setattr("chatbot.app.is_auth_required", mock_is_auth)
         
         # Mock settings
         mock_settings = Mock()

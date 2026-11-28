@@ -1,6 +1,7 @@
 export const ROUTES = {
   LOGIN: "/login",
   LOGOUT: "/logout",
+  AUTHORIZE: "/authorize",
   DIGITAL_ASSISTANTS: "/digital-assistants",
   SERVICES: "/services",
   DATA_CONNECTORS: "/data-connectors",
@@ -11,6 +12,7 @@ export const ROUTES = {
 
 export const PAGE_TITLES = {
   LOGIN: "Login",
+  AUTHORIZE: "Authorize",
   DIGITAL_ASSISTANTS: "Digital assistants",
   SERVICES: "Services",
   DATA_CONNECTORS: "Data connectors",

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	deploymentauth "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/auth"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/podman"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -29,6 +30,7 @@ import (
 	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	k8syaml "sigs.k8s.io/yaml"
 )
 
@@ -49,6 +51,15 @@ type PodmanDeployer struct {
 	appRepo         repository.ApplicationRepository
 	serviceRepo     repository.ServiceRepository
 	componentRepo   repository.ComponentRepository
+	credentials     deploymentauth.CredentialProvisioner
+}
+
+// WithCredentialProvisioner sets the source of per-deployment service credentials (DA2) and
+// returns the deployer. A nil provisioner means no credential is created.
+func (d *PodmanDeployer) WithCredentialProvisioner(p deploymentauth.CredentialProvisioner) *PodmanDeployer {
+	d.credentials = p
+
+	return d
 }
 
 // NewPodmanDeployer creates a new PodmanDeployer instance.
@@ -535,6 +546,12 @@ func (d *PodmanDeployer) deployComponentPods(
 func (d *PodmanDeployer) deployServices(ctx context.Context, plan *DeploymentPlan) error {
 	logger.InfofCtx(ctx, "Deploying %d services concurrently...\n", len(plan.Services))
 
+	// The catalog auth settings are the same for every service on this worker, so store them once
+	// in a shared secret that the service pods read, before any of them starts.
+	if err := deploymentauth.EnsurePodmanCatalogAuthSecret(ctx, d.runtime, d.isRemoteWorker()); err != nil {
+		return err
+	}
+
 	// Build id → dbID index so RunConcurrently can track status per service.
 	items := make(map[string]uuid.UUID, len(plan.Services))
 	for id, svc := range plan.Services {
@@ -556,6 +573,15 @@ func (d *PodmanDeployer) deployServices(ctx context.Context, plan *DeploymentPla
 	)
 }
 
+// isRemoteWorker reports whether services are deployed to a remote worker, one that reaches the
+// catalog through its own Caddy egress. The local worker is also driven through a RemoteRuntime,
+// but it shares the control plane's network and the gateway registers no egress route for it.
+func (d *PodmanDeployer) isRemoteWorker() bool {
+	rt, ok := d.runtime.(*remoteruntime.RemoteRuntime)
+
+	return ok && !strings.EqualFold(rt.WorkerName(), workerconstants.LocalWorkerName)
+}
+
 // deployService deploys a single service and updates its endpoint in the database.
 func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan, serviceID string, svc *ServicePlan) error {
 	logger.InfofCtx(ctx, "Deploying service %s...\n", serviceID)
@@ -565,6 +591,8 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 		logger.ErrorfCtx(ctx, "Failed to update service status to Initializing: %v\n", err)
 		// Don't fail the deployment if status update fails
 	}
+
+	deploymentauth.InjectServiceAuthValues(svc.CatalogID, svc.Values, d.runtimeType)
 
 	// Load service from catalog
 	service, err := d.catalogProvider.LoadService(svc.CatalogID)
@@ -577,6 +605,23 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 	if err != nil {
 		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", d.runtimeType, err)
 	}
+
+	// Provision the service credential, if the asset declares one, and hand the pod only the
+	// name of the Secret that holds it. Roll it back if anything below fails.
+	credSpecs, err := scopedProvider.LoadServiceCredentialSpecs(svc.CatalogID)
+	if err != nil {
+		return err
+	}
+	credSecrets, err := deploymentauth.ProvisionCredentialSecrets(ctx, credSpecs, svc.CatalogID, svc.DatabaseID.String(), svc.Values, d.credentials, d.runtime)
+	if err != nil {
+		return err
+	}
+	deployed := false
+	defer func() {
+		if !deployed {
+			credSecrets.Rollback(ctx)
+		}
+	}()
 
 	// Load runtime-specific metadata (contains PodTemplateExecutions)
 	serviceAppMetadata, err := scopedProvider.LoadServiceRuntimeMetadata(svc.CatalogID)
@@ -594,6 +639,8 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 	if err := d.deployServicePods(ctx, plan.ApplicationID, svc, serviceAppMetadata, tmpls); err != nil {
 		return fmt.Errorf("failed to deploy service pods: %w", err)
 	}
+
+	deployed = true
 
 	logger.InfofCtx(ctx, "Service %s deployed successfully\n", serviceID)
 

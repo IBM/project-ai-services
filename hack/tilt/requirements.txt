@@ -45,3 +45,4 @@ apscheduler[sqlalchemy]==3.11.3
 boto3
 paramiko
 cryptography
+PyJWT[crypto]

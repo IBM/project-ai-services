@@ -10,7 +10,8 @@ import asyncio
 import uuid
 from typing import  Optional, Annotated
 
-from fastapi import APIRouter, Body, Query
+from fastapi import Depends, APIRouter, Body, Query
+from common.auth import require_role
 from fastapi.responses import  Response
 from sqlalchemy.exc import IntegrityError
 from common.misc_utils import get_logger, get_llm_endpoint
@@ -48,6 +49,7 @@ logger = get_logger("schema_router")
 
 @router.post(
     "",
+    dependencies=[Depends(require_role("write"))],
     status_code=201,
     response_model=SchemaCreatedResponse,
     responses={
@@ -180,6 +182,7 @@ async def register_schema(body: Annotated[SchemaRegisterRequest, Body(
 
 @router.get(
     "",
+    dependencies=[Depends(require_role("read"))],
     response_model=SchemaListResponse,
     responses={
         400: http_error_responses[400],
@@ -225,6 +228,7 @@ async def list_schemas(
 
 @router.get(
     "/{schema_id}",
+    dependencies=[Depends(require_role("read"))],
     response_model=SchemaDetailResponse,
     responses={
         404: http_error_responses[404],
@@ -264,6 +268,7 @@ async def get_schema(schema_id: str) -> SchemaDetailResponse:
 
 @router.delete(
     "/{schema_id}",
+    dependencies=[Depends(require_role("write"))],
     status_code=204,
     responses={
         204: {"description": "Schema deleted"},
@@ -321,6 +326,7 @@ async def delete_schema(schema_id: str) -> Response:
 
 @router.delete(
     "",
+    dependencies=[Depends(require_role("admin"))],
     status_code=204,
     responses={
         204: {"description": "All schemas deleted"},

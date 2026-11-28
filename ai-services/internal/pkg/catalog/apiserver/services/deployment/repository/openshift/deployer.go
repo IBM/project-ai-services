@@ -9,6 +9,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	deploymentauth "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/auth"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -18,6 +19,7 @@ import (
 	helmutil "github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	k8sutils "github.com/project-ai-services/ai-services/internal/pkg/utils/k8s"
 )
 
@@ -36,6 +38,15 @@ type OpenShiftDeployer struct {
 	appRepo         repository.ApplicationRepository
 	serviceRepo     repository.ServiceRepository
 	componentRepo   repository.ComponentRepository
+	credentials     deploymentauth.CredentialProvisioner
+}
+
+// WithCredentialProvisioner sets the source of per-deployment service credentials (DA2) and
+// returns the deployer. A nil provisioner means no credential is created.
+func (d *OpenShiftDeployer) WithCredentialProvisioner(p deploymentauth.CredentialProvisioner) *OpenShiftDeployer {
+	d.credentials = p
+
+	return d
 }
 
 // NewOpenShiftDeployer creates a deployer for the OpenShift runtime.
@@ -164,6 +175,12 @@ func (d *OpenShiftDeployer) deployComponent(ctx context.Context, plan *Deploymen
 // deployServicesConcurrently installs all service Helm charts in parallel and waits for all pods
 // to become Ready.
 func (d *OpenShiftDeployer) deployServicesConcurrently(ctx context.Context, plan *DeploymentPlan) error {
+	// The catalog auth settings are the same for every service in the namespace, so store them
+	// once in a shared secret that the service pods read, before any of them starts.
+	if err := deploymentauth.EnsureOpenShiftCatalogAuthSecret(ctx, d.runtime, d.isRemoteWorker()); err != nil {
+		return err
+	}
+
 	// Build id → dbID index so RunConcurrently can track status per service.
 	items := make(map[string]uuid.UUID, len(plan.Services))
 	for id, svc := range plan.Services {
@@ -185,10 +202,42 @@ func (d *OpenShiftDeployer) deployServicesConcurrently(ctx context.Context, plan
 	)
 }
 
+// isRemoteWorker reports whether services are deployed to a remote cluster, which reaches the
+// catalog on its public address rather than on the in-cluster Service name.
+func (d *OpenShiftDeployer) isRemoteWorker() bool {
+	_, ok := d.runtime.(*remoteruntime.RemoteRuntime)
+
+	return ok
+}
+
 // deployService installs or upgrades the Helm chart for a single service,
 // then reads the OpenShift Routes for the release and stores endpoints in the database.
 func (d *OpenShiftDeployer) deployService(ctx context.Context, plan *DeploymentPlan, svc *ServicePlan) error {
 	releaseName := catalogutils.HelmReleaseName(plan.ApplicationID, svc.CatalogID)
+
+	deploymentauth.InjectServiceAuthValues(svc.CatalogID, svc.Values, d.runtime.Type().String())
+
+	// Provision the service credential, if the asset declares one, and hand the chart only the
+	// name of the Secret that holds it, so the credential never reaches the Helm release.
+	// Roll it back if the install fails.
+	scopedProvider, err := d.catalogProvider.WithRuntime(d.runtime.Type().String())
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", d.runtime.Type(), err)
+	}
+	credSpecs, err := scopedProvider.LoadServiceCredentialSpecs(svc.CatalogID)
+	if err != nil {
+		return err
+	}
+	credSecrets, err := deploymentauth.ProvisionCredentialSecrets(ctx, credSpecs, svc.CatalogID, svc.DatabaseID.String(), svc.Values, d.credentials, d.runtime)
+	if err != nil {
+		return err
+	}
+	deployed := false
+	defer func() {
+		if !deployed {
+			credSecrets.Rollback(ctx)
+		}
+	}()
 
 	fsys, err := d.catalogProvider.GetItemFS(svc.CatalogID)
 	if err != nil {
@@ -198,6 +247,8 @@ func (d *OpenShiftDeployer) deployService(ctx context.Context, plan *DeploymentP
 	if err := openshiftutils.InstallChart(ctx, d.helm, releaseName, svc.CatalogPath, fsys, svc.Values, svc.DatabaseID.String()); err != nil {
 		return err
 	}
+
+	deployed = true
 
 	if err := d.registerServiceEndpoints(ctx, plan, releaseName, svc); err != nil {
 		// Non-fatal: log and continue — deployment itself succeeded.

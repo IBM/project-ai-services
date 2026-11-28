@@ -242,19 +242,27 @@ func jobResultDownloadURL(baseURL, jobID string) string {
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
+// httpCfg returns the HTTP config for the API, which enforces service tokens.
+func httpCfg(timeout time.Duration) common.HTTPClientConfig {
+	cfg := common.HTTPConfigForTimeout(timeout)
+	cfg.Service = common.ServiceTranslate
+
+	return cfg
+}
+
 func doGET(ctx context.Context, url string) ([]byte, int, error) {
-	return common.DoGET(ctx, url, common.HTTPConfigForTimeout(getCallTimeout))
+	return common.DoGET(ctx, url, httpCfg(getCallTimeout))
 }
 
 func doPOST(ctx context.Context, url string, body *bytes.Buffer, contentType string) ([]byte, int, error) {
-	return common.DoPOST(ctx, url, body, contentType, common.HTTPConfigForTimeout(postCallTimeout))
+	return common.DoPOST(ctx, url, body, contentType, httpCfg(postCallTimeout))
 }
 
 // ── Service operations ────────────────────────────────────────────────────────
 
 // HealthCheck calls GET /health and returns an error unless the service reports status "ok".
 func HealthCheck(ctx context.Context, baseURL string) error {
-	health, err := common.GetJSON[HealthCheckResponse](ctx, healthURL(baseURL), common.HTTPConfigForTimeout(getCallTimeout))
+	health, err := common.GetJSON[HealthCheckResponse](ctx, healthURL(baseURL), httpCfg(getCallTimeout))
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
@@ -369,7 +377,7 @@ func CreateJobExpectingError(ctx context.Context, baseURL, filePath, sourceLang,
 
 // GetJobDetail fetches job details from GET /v1/translate/jobs/{id} and expects 200.
 func GetJobDetail(ctx context.Context, baseURL, jobID string) (*JobDetailResponse, error) {
-	return common.GetJSON[JobDetailResponse](ctx, jobURL(baseURL, jobID), common.HTTPConfigForTimeout(getCallTimeout))
+	return common.GetJSON[JobDetailResponse](ctx, jobURL(baseURL, jobID), httpCfg(getCallTimeout))
 }
 
 // GetJobDetailRaw fetches GET /v1/translate/jobs/{id} and returns raw (body, statusCode, error).
@@ -380,13 +388,13 @@ func GetJobDetailRaw(ctx context.Context, baseURL, jobID string) ([]byte, int, e
 
 // GetJobResult fetches GET /v1/translate/jobs/{id}/result and expects 200.
 func GetJobResult(ctx context.Context, baseURL, jobID string) (*JobResultResponse, error) {
-	return common.GetJSON[JobResultResponse](ctx, jobResultURL(baseURL, jobID), common.HTTPConfigForTimeout(getCallTimeout))
+	return common.GetJSON[JobResultResponse](ctx, jobResultURL(baseURL, jobID), httpCfg(getCallTimeout))
 }
 
 // DownloadJobResult fetches GET /v1/translate/jobs/{id}/result/download, expects 200 and returns the
 // full response so callers can assert on headers as well as the body.
 func DownloadJobResult(ctx context.Context, baseURL, jobID string) (*common.HTTPResponse, error) {
-	resp, err := common.DoGETFull(ctx, jobResultDownloadURL(baseURL, jobID), common.HTTPConfigForTimeout(getCallTimeout))
+	resp, err := common.DoGETFull(ctx, jobResultDownloadURL(baseURL, jobID), httpCfg(getCallTimeout))
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +425,7 @@ func ListJobs(ctx context.Context, baseURL string, limit, offset int, status str
 		"status_filter": status,
 	})
 
-	return common.GetJSON[JobsListResponse](ctx, listURL, common.HTTPConfigForTimeout(getCallTimeout))
+	return common.GetJSON[JobsListResponse](ctx, listURL, httpCfg(getCallTimeout))
 }
 
 // ListJobsRaw calls GET /v1/translate/jobs with a status filter and returns raw bytes and status.

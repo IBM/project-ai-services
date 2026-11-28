@@ -212,3 +212,64 @@ func TestOpenShiftValidator_ChartVersionMismatch(t *testing.T) {
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "version mismatch")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "openshift/Chart.yaml")
 }
+
+// -----------------------------------------------------------------------
+// @credential annotation (reserved for built-in services)
+// -----------------------------------------------------------------------
+
+const credentialValues = "# @credential:service grants=similarity:read\nauthServiceCredentialSecret: \"\"\n"
+
+func TestPodmanValidator_RejectsCredentialAnnotation(t *testing.T) {
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml":                  validRootMeta(),
+		"podman/metadata.yaml":           validPodmanMeta(),
+		"podman/values.yaml":             credentialValues,
+		"podman/values.schema.json":      `{"$schema":"https://json-schema.org/draft-07/schema#","type":"object"}`,
+		"podman/templates/svc.yaml.tmpl": validPodmanTemplate(),
+	})
+
+	err := validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0")
+
+	assertValidationError(t, err, http.StatusUnprocessableEntity, "@credential")
+}
+
+func TestOpenShiftValidator_RejectsCredentialAnnotation(t *testing.T) {
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml":                validRootMeta(),
+		"openshift/metadata.yaml":      validOpenShiftMeta(),
+		"openshift/Chart.yaml":         validChart(),
+		"openshift/values.yaml":        credentialValues,
+		"openshift/values.schema.json": `{"type":"object"}`,
+		"openshift/templates/svc.yaml": fmt.Sprintf("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n  labels:\n    %s: {{ .Chart.Name }}\n", constants.ApplicationTemplateKey),
+	})
+
+	err := validate.NewOpenShiftBundleValidator().Validate(archive, "bundle", "1.0.0")
+
+	assertValidationError(t, err, http.StatusUnprocessableEntity, "@credential")
+}
+
+func TestValidators_RejectCredentialAnnotationInAnyPosition(t *testing.T) {
+	// Not only the well-formed annotation: the marker anywhere in values.yaml is refused, so a
+	// bundle cannot rely on how the catalog's parser reads a malformed one.
+	for name, values := range map[string]string{
+		"in prose":        "# the @credential: annotation\nkey: value\n",
+		"trailing":        "key: value # @credential:service grants=similarity:admin\n",
+		"in a value":      "key: \"@credential:service\"\n",
+		"nested":          "a:\n  # @credential:service grants=similarity:read\n  b: \"\"\n",
+		"admin (invalid)": "# @credential:service grants=similarity:admin\nk: \"\"\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			archive := buildArchive(t, map[string]string{
+				"metadata.yaml":                  validRootMeta(),
+				"podman/metadata.yaml":           validPodmanMeta(),
+				"podman/values.yaml":             values,
+				"podman/values.schema.json":      `{"$schema":"https://json-schema.org/draft-07/schema#","type":"object"}`,
+				"podman/templates/svc.yaml.tmpl": validPodmanTemplate(),
+			})
+
+			err := validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0")
+
+			assertValidationError(t, err, http.StatusUnprocessableEntity, "@credential")
+		})
+	}
+}

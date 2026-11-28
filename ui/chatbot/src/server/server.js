@@ -16,7 +16,12 @@ app.post('/v1/chat/completions', async (req, res) => {
       method: 'post',
       url: `${targetURL}/v1/chat/completions`,
       params: req.query,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(req.headers.authorization && {
+          Authorization: req.headers.authorization,
+        }),
+      },
       responseType: 'stream',
       data: JSON.stringify(req.body),
     });
@@ -47,7 +52,12 @@ app.get('/db-status', async (req, res) => {
 
   try {
     const response = await axios.get(`${targetURL}/db-status`, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(req.headers.authorization && {
+          Authorization: req.headers.authorization,
+        }),
+      },
     });
 
     res.json(response.data); // return server response to React client

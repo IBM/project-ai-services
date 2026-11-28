@@ -81,7 +81,7 @@ spec:
         failureThreshold: 3
       readinessProbe:
         httpGet:
-          path: /health
+          path: /ready
           port: 8500
         initialDelaySeconds: 10
         periodSeconds: 5
@@ -106,6 +106,12 @@ spec:
           value: "http://{{ .Values.ml_inference.host }}:{{ .Values.ml_inference.port }}"
         - name: MODEL_REPO_PATH
           value: "/models"
+        # AUTH_JWKS_URL and AUTH_JWKS_PLAINTEXT_HOSTS come from the shared catalog-auth secret.
+        - name: AUTH_AUDIENCE
+          value: "{{ .Values.authAudience }}"
+      envFrom:
+        - secretRef:
+            name: "catalog-auth"
       volumeMounts:
         - mountPath: /var/cache:z
           name: cache

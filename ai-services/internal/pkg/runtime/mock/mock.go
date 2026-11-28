@@ -364,6 +364,20 @@ func (c *Client) SecretExists(_ context.Context, nameOrID string) (bool, error) 
 	return ok, nil
 }
 
+// CreateSecret implements runtime.Runtime.
+func (c *Client) CreateSecret(_ context.Context, name string, data map[string][]byte, _ map[string]string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	values := make(map[string]string, len(data))
+	for k, v := range data {
+		values[k] = string(v)
+	}
+	c.secrets[name] = values
+
+	return nil
+}
+
 // UpdateSecret implements runtime.Runtime.
 func (c *Client) UpdateSecret(_ context.Context, name, _ string, _ map[string][]byte) error {
 	if err := c.requireOpenShift(); err != nil {

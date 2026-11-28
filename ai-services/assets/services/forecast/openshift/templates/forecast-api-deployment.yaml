@@ -117,6 +117,16 @@ spec:
               value: "/models"
             - name: LOG_LEVEL
               value: "{{ .Values.forecast.log_level }}"
+            # AUTH_JWKS_URL and AUTH_JWKS_PLAINTEXT_HOSTS come from the shared catalog-auth secret.
+            - name: AUTH_AUDIENCE
+              value: "{{ .Values.authAudience }}"
+            {{- if .Values.authCatalogCaBundleSecret }}
+            - name: AUTH_CATALOG_CA_BUNDLE
+              value: "/etc/ssl/certs/catalog-ca-bundle.crt"
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: "catalog-auth"
           ports:
             - containerPort: 8500
               protocol: TCP
@@ -130,7 +140,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 8500
             initialDelaySeconds: 10
             periodSeconds: 30
@@ -149,6 +159,12 @@ spec:
             - mountPath: /etc/secret/forecast-db-encryption-secret
               name: forecast-db-encryption-secret
               readOnly: true
+            {{- if .Values.authCatalogCaBundleSecret }}
+            - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
+              subPath: ca-bundle.crt
+              name: ca-bundle
+              readOnly: true
+            {{- end }}
       volumes:
         - name: repository
           persistentVolumeClaim:
@@ -156,3 +172,8 @@ spec:
         - name: forecast-db-encryption-secret
           secret:
             secretName: forecast-db-encryption-secret
+        {{- if .Values.authCatalogCaBundleSecret }}
+        - name: ca-bundle
+          secret:
+            secretName: {{ .Values.authCatalogCaBundleSecret | quote }}
+        {{- end }}

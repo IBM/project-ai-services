@@ -68,6 +68,16 @@ const (
 	// the worker egress keeps it.
 	LiteLLMPathPrefix = "/litellm"
 
+	// CatalogAuthIngressRouteID is the Caddy @id of the control-plane route that exposes the
+	// catalog's service-auth endpoints (JWKS, code exchange, service-credential token) to remote
+	// workers: service -> worker Caddy egress :8080 -> mTLS -> CP Caddy ingress :9443 -> catalog.
+	CatalogAuthIngressRouteID = "catalog-auth"
+	// CatalogAuthEgressRouteID is the Caddy @id of the worker-side route.
+	CatalogAuthEgressRouteID = "catalog-auth--egress"
+	// CatalogAuthPathPrefix is the URL prefix both catalog-auth routes match. The CP ingress
+	// strips it and the worker egress keeps it.
+	CatalogAuthPathPrefix = "/catalog-auth"
+
 	// MetaKeyBaseDir is the worker metadata key sent during Register and stored in worker.metadata JSON.
 	MetaKeyBaseDir = "baseDir"
 

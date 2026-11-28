@@ -562,6 +562,38 @@ func (kc *OpenshiftClient) SecretExists(ctx context.Context, nameOrID string) (b
 	return true, nil
 }
 
+// CreateSecret creates an Opaque Secret, or replaces the data and labels of an existing one.
+// It does not restart anything: use UpdateSecret to roll a deployment onto changed data.
+func (kc *OpenshiftClient) CreateSecret(ctx context.Context, name string, data map[string][]byte, labels map[string]string) error {
+	secretClient := kc.KubeClient.CoreV1().Secrets(kc.Namespace)
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: kc.Namespace, Labels: labels},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       data,
+	}
+
+	_, err := secretClient.Create(ctx, secret, metav1.CreateOptions{})
+	if err == nil {
+		return nil
+	}
+	if !k8serrors.IsAlreadyExists(err) {
+		return fmt.Errorf("failed to create secret '%s': %w", name, err)
+	}
+
+	existing, err := secretClient.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get existing secret '%s': %w", name, err)
+	}
+	existing.Data = data
+	existing.Labels = labels
+	if _, err := secretClient.Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("failed to replace secret '%s': %w", name, err)
+	}
+
+	return nil
+}
+
 func (kc *OpenshiftClient) UpdateSecret(ctx context.Context, name, deploymentName string, data map[string][]byte) error {
 	secretClient := kc.KubeClient.CoreV1().Secrets(kc.Namespace)
 

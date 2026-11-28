@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -34,7 +35,12 @@ const (
 
 	operationDigitization = "digitization"
 	statusCompleted       = "completed"
+	// digitizeServiceName is the token audience of the digitize service.
+	digitizeServiceName = "digitize"
 )
+
+// serviceTokenFn obtains the token sent to the digitize service; overridden in tests.
+var serviceTokenFn = catalogclient.ServiceTokenForLoggedInUser
 
 // ErrContentNotFound is returned when the digitize service has no content file for a document.
 var ErrContentNotFound = errors.New("digitized content not found")
@@ -128,11 +134,18 @@ func NewDigitizeBackupClient(serviceURL string) *DigitizeBackupClient {
 func (c *DigitizeBackupClient) CallExportAPI(ctx context.Context) (*DigitizeExportResponse, error) {
 	logger.Infoln("Calling digitize Export API...")
 
+	// The service enforces authentication: send a token issued to the logged-in catalog user.
+	token, err := serviceTokenFn(ctx, digitizeServiceName)
+	if err != nil {
+		return nil, err
+	}
+
 	var exportResponse DigitizeExportResponse
 
 	logger.Infoln("Sending export request to: /v1/export?limit=-1")
 	resp, err := c.client.R().
 		SetContext(ctx).
+		SetAuthToken(token).
 		SetQueryParam("limit", ExportAllRecordsLimit).
 		SetResult(&exportResponse).
 		Get("/v1/export")

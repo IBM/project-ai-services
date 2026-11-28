@@ -29,3 +29,11 @@ mcp:
     limits:
       cpu: "250m"
       memory: "128Mi"
+
+# The catalog addresses (JWKS URL, plaintext hosts) come from the shared "catalog-auth" secret
+# that the catalog creates in the namespace at deploy time.
+authAudience: "similarity"
+# Name of the Secret that holds the catalog CA bundle. Set by the catalog at deploy time when it
+# has one; the PEM itself never passes through values.
+authCatalogCaBundleSecret: ""
+authCatalogHostAliases: ""

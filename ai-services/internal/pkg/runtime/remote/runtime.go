@@ -228,6 +228,19 @@ func (r *RemoteRuntime) SecretExists(ctx context.Context, nameOrID string) (bool
 	return exists, nil
 }
 
+// CreateSecret forwards a secret create/replace to the remote worker. The payload carries the
+// secret value and is not logged.
+func (r *RemoteRuntime) CreateSecret(ctx context.Context, name string, data map[string][]byte, labels map[string]string) error {
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_CREATE_SECRET, payload.CreateSecret{
+		Namespace: r.namespace,
+		Name:      name,
+		Data:      data,
+		Labels:    labels,
+	})
+
+	return err
+}
+
 // UpdateSecret forwards a secret update + deployment restart to the remote OpenShift worker.
 func (r *RemoteRuntime) UpdateSecret(ctx context.Context, name, deploymentName string, data map[string][]byte) error {
 	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_UPDATE_SECRET, payload.UpdateSecret{
