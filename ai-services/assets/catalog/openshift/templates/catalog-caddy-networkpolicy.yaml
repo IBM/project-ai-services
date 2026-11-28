@@ -1,0 +1,51 @@
+# The Caddy Admin API is unauthenticated: whoever can reach :2019 can reroute traffic and change
+# the mTLS settings. Only the catalog backend may reach it. The Service ports 9443 (Route) and 8080
+# (egress, used by LiteLLM) stay open, as before.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Values.appName }}--caddy-admin
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  podSelector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: {{ .Values.appName }}--caddy
+  policyTypes:
+    - Ingress
+  ingress:
+    # Admin API: catalog-backend only.
+    - from:
+        - podSelector:
+            matchLabels:
+              ai-services.io/application: {{ .Release.Name }}
+              ai-services.io/component: catalog-backend
+      ports:
+        - port: 2019
+          protocol: TCP
+    # Private egress: LiteLLM calls remote models through it.
+    - from:
+        - podSelector:
+            matchLabels:
+              ai-services.io/application: {{ .Release.Name }}
+              ai-services.io/component: litellm
+      ports:
+        - port: 8080
+          protocol: TCP
+    # Private ingress: the OpenShift router, which forwards the Route. mTLS is enforced by Caddy
+    # itself. A router on the host network is not matched by the ingress policy-group label, so it
+    # is allowed explicitly.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              policy-group.network.openshift.io/ingress: ""
+        - namespaceSelector:
+            matchLabels:
+              policy-group.network.openshift.io/host-network: ""
+      ports:
+        - port: 9443
+          protocol: TCP
+    # Probes run from the node (kubelet) and are not subject to NetworkPolicy.

@@ -1,0 +1,57 @@
+{
+    # The Admin API is unauthenticated, so the NetworkPolicy admits :2019 from the worker pod only.
+    admin 0.0.0.0:2019
+
+    # Caddy otherwise opens :80 to redirect HTTP to HTTPS for the :9443 TLS server. The
+    # restricted SCC does not allow binding it, and nothing needs it: the certificate comes
+    # from get_certificate, not ACME.
+    auto_https disable_redirects
+
+    servers :9443 {
+        name private_mtls_ingress
+    }
+
+    servers :8080 {
+        name private_mtls_egress
+    }
+}
+
+# Private ingress for control-plane -> worker traffic (mTLS enforced). OpenShift Routes
+# terminate nothing here: the Route is passthrough, so this is the only TLS endpoint.
+# tls.key is AES-GCM encrypted; the encrypted_file module decrypts it in memory on each
+# handshake. The files are written by the worker once it has registered, which is why the
+# Caddy container waits for ca.crt before starting.
+:9443 {
+    # Accept only the control plane's client certificate, whose whole subject is
+    # CN=catalog-worker-gateway. The pattern is anchored: unanchored, it would also match a
+    # worker certificate whose subject merely contains the name. vars_regexp, not vars: vars
+    # compares exactly and treats "*" literally.
+    @not_control_plane not vars_regexp {http.request.tls.client.subject} ^CN=catalog-worker-gateway$
+    handle @not_control_plane {
+        abort
+    }
+
+    handle /internal/health {
+        respond "OK" 200
+    }
+
+    tls {
+        get_certificate encrypted_file {
+            cert        /data/worker-tls/tls.crt
+            key         /data/worker-tls/tls.key
+            secret_file /etc/secret/worker-mtls-encryption-secret/mtls-encryption-key
+        }
+        client_auth {
+            mode require_and_verify
+            trusted_ca_cert_file /data/worker-tls/ca.crt
+        }
+    }
+}
+
+# Plain-HTTP egress for services on this cluster, and the health endpoint for the probes.
+:8080 {
+    respond /health "OK" 200
+}
+
+# Model ingress routes and the LiteLLM egress route are registered at runtime by the
+# control plane through the Caddy Admin API.

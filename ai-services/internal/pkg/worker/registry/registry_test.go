@@ -3,12 +3,16 @@ package registry
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
 
@@ -311,6 +315,121 @@ func TestRegistry_RegisterIdempotent(t *testing.T) {
 	}
 	if e1 != e2 {
 		t.Error("expected same in-memory entry after duplicate Register attempt")
+	}
+}
+
+func TestRegistry_Preregister_ReservedName(t *testing.T) {
+	reg := New(newFakeWorkerRepo())
+
+	for _, name := range []string{workerconstants.WorkerGatewayName, "Catalog-Worker-Gateway"} {
+		if _, err := reg.Preregister(context.Background(), name); !errors.Is(err, ErrReservedWorkerName) {
+			t.Errorf("Preregister(%q) err = %v, want ErrReservedWorkerName", name, err)
+		}
+	}
+}
+
+func hostMeta(host string) map[string]string {
+	return map[string]string{workerconstants.MetaKeyPrivateIngressHost: host}
+}
+
+func TestRegistry_Register_IngressHostInUseByConnectedWorker(t *testing.T) {
+	reg := New(nil)
+
+	if _, err := reg.Register(context.Background(), "w1", "openshift", hostMeta("w.apps.example.com")); err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+
+	// Same host, different case: hosts are case-insensitive.
+	_, err := reg.Register(context.Background(), "w2", "openshift", hostMeta("W.apps.example.com"))
+	if !errors.Is(err, ErrIngressHostInUse) {
+		t.Fatalf("Register with a host held by another worker: err = %v, want ErrIngressHostInUse", err)
+	}
+	if _, ok := reg.Get("w2"); ok {
+		t.Error("w2 must not be registered after the host was refused")
+	}
+}
+
+func TestRegistry_Register_IngressHostInUseByDisconnectedWorker(t *testing.T) {
+	reg := New(newFakeWorkerRepo())
+
+	if _, err := reg.Register(context.Background(), "w1", "openshift", hostMeta("w.apps.example.com")); err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+	reg.Disconnect(context.Background(), "w1")
+
+	_, err := reg.Register(context.Background(), "w2", "openshift", hostMeta("w.apps.example.com"))
+	if !errors.Is(err, ErrIngressHostInUse) {
+		t.Fatalf("Register with the host of a disconnected worker: err = %v, want ErrIngressHostInUse", err)
+	}
+}
+
+func TestRegistry_Register_SameWorkerKeepsItsIngressHost(t *testing.T) {
+	reg := New(newFakeWorkerRepo())
+
+	if _, err := reg.Register(context.Background(), "w1", "openshift", hostMeta("w.apps.example.com")); err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+	reg.Disconnect(context.Background(), "w1")
+
+	if _, err := reg.Register(context.Background(), "w1", "openshift", hostMeta("w.apps.example.com")); err != nil {
+		t.Fatalf("re-Register of the same worker with its own host: %v", err)
+	}
+}
+
+func TestRegistry_Register_PodmanHostsDerivedFromNameAndSuffix(t *testing.T) {
+	reg := New(nil)
+	podman := func(suffix string) map[string]string {
+		return map[string]string{workerconstants.MetaKeyDomainSuffix: suffix}
+	}
+
+	if _, err := reg.Register(context.Background(), "w1", "podman", podman("lab.example.com")); err != nil {
+		t.Fatalf("Register w1: %v", err)
+	}
+	// Different name, same suffix: different host, allowed.
+	if _, err := reg.Register(context.Background(), "w2", "podman", podman("lab.example.com")); err != nil {
+		t.Fatalf("Register w2: %v", err)
+	}
+	// A worker that reports w1's derived host as its own is refused.
+	_, err := reg.Register(context.Background(), "w3", "openshift", hostMeta("w1.lab.example.com"))
+	if !errors.Is(err, ErrIngressHostInUse) {
+		t.Fatalf("Register claiming a Podman worker's derived host: err = %v, want ErrIngressHostInUse", err)
+	}
+}
+
+// TestRegistry_Register_IngressHostRace registers many workers claiming one host at once. Exactly
+// one may win; the check and the claim must not interleave.
+func TestRegistry_Register_IngressHostRace(t *testing.T) {
+	reg := New(newFakeWorkerRepo())
+
+	const n = 20
+	var wg sync.WaitGroup
+	var won atomic.Int32
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			name := fmt.Sprintf("w%d", i)
+			if _, err := reg.Register(context.Background(), name, "openshift", hostMeta("same.apps.example.com")); err == nil {
+				won.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := won.Load(); got != 1 {
+		t.Errorf("%d workers registered the same host, want exactly 1", got)
+	}
+}
+
+func TestRegistry_Register_NoHostNoConflict(t *testing.T) {
+	reg := New(nil)
+
+	// Workers without a host (the co-located local worker) never conflict with each other.
+	if _, err := reg.Register(context.Background(), "a", "openshift", nil); err != nil {
+		t.Fatalf("Register a: %v", err)
+	}
+	if _, err := reg.Register(context.Background(), "b", "openshift", map[string]string{}); err != nil {
+		t.Fatalf("Register b: %v", err)
 	}
 }
 

@@ -37,9 +37,10 @@ const (
 	cpSecretDir      = "/etc/secret/" + catalogconstants.CatalogMTLSSecretName
 )
 
-// DomainResolver resolves the DOMAIN_SUFFIX and private ingress port a worker reported when it registered.
+// DomainResolver resolves the private ingress host and port of a worker from what it reported when
+// it registered.
 type DomainResolver interface {
-	DomainSuffix(name string) (string, error)
+	PrivateIngressHost(name string) (string, error)
 	PrivateIngressPort(name string) string
 }
 
@@ -92,7 +93,9 @@ func PathPrefix(workerName string, componentID uuid.UUID) string {
 // the control plane uses for the model: the egress host and port followed by the route prefix,
 // so "http://<returned>/v1" is the model's API base.
 func (m *Manager) Register(ctx context.Context, rt runtime.Runtime, workerName string, componentID uuid.UUID, upstream string) (string, error) {
-	suffix, err := m.workers.DomainSuffix(workerName)
+	// The worker certificate carries this host as its SAN, so it is both the name dialed and the
+	// name verified.
+	workerHost, err := m.workers.PrivateIngressHost(workerName)
 	if err != nil {
 		return "", err
 	}
@@ -101,10 +104,6 @@ func (m *Manager) Register(ctx context.Context, rt runtime.Runtime, workerName s
 	if workerPort == "" {
 		workerPort = proxy.DefaultPrivateIngressPort
 	}
-
-	// The worker certificate carries <workerName>.<domainSuffix> as its SAN, so that is both the
-	// name dialed and the name verified.
-	workerHost := workerName + "." + suffix
 
 	egressHost, err := m.cpEgressHost()
 	if err != nil {

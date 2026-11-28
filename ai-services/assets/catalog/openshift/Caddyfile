@@ -1,0 +1,54 @@
+{
+    # The Admin API is unauthenticated and, on a wildcard address, Caddy does not check the
+    # Host header, so the only thing limiting who can use it is the NetworkPolicy
+    # (ai-services--caddy-admin): the catalog backend is the sole allowed client.
+    admin 0.0.0.0:2019
+
+    # Caddy otherwise opens :80 to redirect HTTP to HTTPS for the :9443 TLS server. The
+    # restricted SCC does not allow binding it, and nothing needs it: the certificate comes
+    # from get_certificate, not ACME.
+    auto_https disable_redirects
+
+    servers :9443 {
+        name private_mtls_ingress
+    }
+
+    servers :8080 {
+        name private_mtls_egress
+    }
+}
+
+# Private ingress for worker -> control plane traffic (mTLS enforced). The OpenShift Route is
+# passthrough, so this is the only TLS endpoint. Serves the gateway server certificate and
+# trusts only client certificates signed by the platform CA. server.key is AES-GCM encrypted;
+# the encrypted_file module decrypts it in memory on each handshake.
+:9443 {
+    handle /internal/health {
+        respond "OK" 200
+    }
+
+    # LiteLLM for services on remote workers. The worker's egress route keeps the prefix, this
+    # strips it. It is static because LiteLLM is a fixed Service of this release.
+    handle_path /litellm/* {
+        reverse_proxy litellm:{{ .Values.litellm.port }}
+    }
+
+    tls {
+        get_certificate encrypted_file {
+            cert        /data/gateway-pki/server.crt
+            key         /data/gateway-pki/server.key
+            secret_file /etc/secret/catalog-mtls-encryption-secret/mtls-encryption-key
+        }
+        client_auth {
+            mode require_and_verify
+            trusted_ca_cert_file /data/gateway-pki/ca.crt
+        }
+    }
+}
+
+# Plain-HTTP private egress for LiteLLM (control plane -> remote model over mTLS), and the
+# health endpoint for the probes. Model egress routes are registered at runtime by the catalog
+# backend through the Caddy Admin API.
+:8080 {
+    respond /health "OK" 200
+}

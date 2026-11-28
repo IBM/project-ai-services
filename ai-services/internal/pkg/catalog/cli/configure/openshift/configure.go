@@ -156,6 +156,7 @@ func prepareValues(ctx context.Context, tp templates.Template, rt *runtimeOpensh
 func generateArgParams(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient, passwordHash string, skipLocalWorker bool) (map[string]string, error) {
 	argParams := make(map[string]string)
 	argParams[configure.ArgParamAdminPasswordHash] = passwordHash
+	argParams[configure.ArgParamAppName] = catalogconstants.CatalogAppName
 
 	argParams[configure.ArgParamLocalWorker] = strconv.FormatBool(!skipLocalWorker)
 

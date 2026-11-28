@@ -43,6 +43,15 @@ spec:
           # No Caddyfile
           {{- end }}
           EOF
+          # --resume makes Caddy load /data/caddy/autosave.json instead of the Caddyfile once that
+          # file exists, so a changed Caddyfile (an upgrade) would never take effect. When the
+          # Caddyfile differs from the one applied on the last start, drop the autosave so the new
+          # one loads. Routes registered at runtime are lost with it.
+          if [ -f /data/caddy/autosave.json ] && [ "$(cat /data/caddy/Caddyfile.applied 2>/dev/null)" != "$(cat /data/caddy/Caddyfile)" ]; then
+            echo "the Caddyfile changed since the last start: discarding the saved config"
+            rm -f /data/caddy/autosave.json
+          fi
+          cp /data/caddy/Caddyfile /data/caddy/Caddyfile.applied
       volumeMounts:
         - name: caddy-data
           mountPath: /data:z

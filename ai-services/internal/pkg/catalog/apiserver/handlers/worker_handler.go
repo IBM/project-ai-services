@@ -72,7 +72,7 @@ type createWorkerResp struct {
 //	@Failure		500		{object}	map[string]interface{}	"Internal error"
 //	@Security		BearerAuth
 //	@Router			/workers [post]
-func (h *WorkerHandler) CreateWorker(c *gin.Context) {
+func (h *WorkerHandler) CreateWorker(c *gin.Context) { //nolint:cyclop,funlen // complexity and length come from flat validation and error-to-status guards, not logic depth
 	var req createWorkerReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
@@ -123,6 +123,11 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 
 	token, err := h.reg.Preregister(ctx, req.WorkerName)
 	if err != nil {
+		if errors.Is(err, registry.ErrReservedWorkerName) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("worker name %q is reserved", req.WorkerName)})
+
+			return
+		}
 		if errors.Is(err, registry.ErrWorkerAlreadyReady) {
 			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("worker %q is already registered and ready", req.WorkerName)})
 
