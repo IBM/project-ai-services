@@ -46,7 +46,7 @@ from forecast.utils.api_utils import (
     list_item,
     merge_connection_details,
     sqlstate,
-    tls_settings_error,
+    validate_tls_settings,
     training_summary,
 )
 from forecast.utils.encryption import EncryptionKeyError, encrypt_secrets, safe_connection_details
@@ -97,7 +97,7 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
             # are invalid, and when there is no usable key to encrypt the secrets. A connector that
             # already exists is checked first, so it is answered with 409 whatever the reason. The
             # TLS settings are checked before the key, because they are the caller's to correct.
-            failure = tls_settings_error(details)
+            failure = validate_tls_settings(details)
             encrypted: dict = {}
             if failure is None:
                 try:

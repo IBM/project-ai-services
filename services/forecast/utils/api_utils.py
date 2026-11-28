@@ -44,7 +44,7 @@ TLS_NEITHER_MESSAGE = (
 )
 
 
-def tls_settings_error(details: dict) -> Optional[str]:
+def validate_tls_settings(details: dict) -> Optional[str]:
     """Return why the TLS settings of new connection details are invalid, or None when they are valid.
 
     Exactly one of a certificate and allow_insecure_connection must be chosen. ``details`` come
@@ -219,7 +219,7 @@ def merge_connection_details(cid: str, config: dict, supplied: dict) -> dict:
 
     # A working connector must not be turned into one that cannot connect: refuse the update
     # and change nothing. (POST stores such a connector as FAILED, but a PUT cannot repair that.)
-    tls_problem = tls_settings_error(merged.model_dump())
+    tls_problem = validate_tls_settings(merged.model_dump())
     if tls_problem:
         logger.warning(f"Update of connector {cid} rejected: {tls_problem}")
         APIError.raise_error(ErrorCode.INVALID_REQUEST, tls_problem)

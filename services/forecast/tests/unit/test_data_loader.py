@@ -753,9 +753,9 @@ def test_the_loader_passes_the_certificate_and_the_flag_to_the_client(ca_pem):
     verified = loader_module._client_from_config(
         {**base, "certificate": ca_pem, "allow_insecure_connection": False}
     )
-    assert insecure.certificate is None and insecure._skip_verification is True
-    assert insecure_str._skip_verification is True
-    assert verified.certificate == ca_pem and verified._skip_verification is False
+    assert insecure.certificate is None and insecure.allow_insecure_connection is True
+    assert insecure_str.allow_insecure_connection is True
+    assert verified.certificate == ca_pem and verified.allow_insecure_connection is False
 
 
 @pytest.mark.parametrize(
@@ -772,13 +772,13 @@ def test_the_stored_flag_is_parsed_so_that_only_a_clear_yes_skips_verification(v
     client = loader_module._client_from_config(
         {"host": "h", "database": "d", "username": "u", "password": "p", "allow_insecure_connection": value}
     )
-    assert client._skip_verification is expected
+    assert client.allow_insecure_connection is expected
 
 
 def test_an_old_connector_without_the_flag_does_not_connect_unverified():
     """A stored connector without the flag defaults to false, so without a certificate it is refused."""
     client = loader_module._client_from_config({"host": "h", "database": "d", "username": "u", "password": "p"})
-    assert client._skip_verification is False
+    assert client.allow_insecure_connection is False
     with patch("mapepire_python.DaemonServer"), patch("mapepire_python.connect") as connect:
         with pytest.raises(DBTLSConfigError):
             client._get_connection()

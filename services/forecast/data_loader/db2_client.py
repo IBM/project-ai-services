@@ -114,11 +114,6 @@ class Db2Client:
         self._conn = custom_connection
         self._server: Optional[Any] = None
 
-    @property
-    def _skip_verification(self) -> bool:
-        """True when the connector asked not to verify the server."""
-        return self.allow_insecure_connection
-
     def _build_ssl_context(self) -> ssl.SSLContext:
         """Return the TLS context: the system trust store plus the certificate, or no certificates.
 
@@ -131,7 +126,7 @@ class Db2Client:
             raise DBTLSConfigError(
                 "The connector must have either a certificate or allow_insecure_connection, not both and not neither"
             )
-        if self._skip_verification:
+        if self.allow_insecure_connection:
             logger.warning(
                 "INSECURE Db2 connection to %s:%s: no certificate is used and the server certificate "
                 "is not verified because the connector sets allow_insecure_connection. The traffic is "
@@ -224,7 +219,7 @@ class Db2Client:
             port=self.port,
             # Mapepire's own switch. The TLS context above is what the patched connect uses; this
             # keeps the object saying the same thing.
-            ignoreUnauthorized=self._skip_verification,
+            ignoreUnauthorized=self.allow_insecure_connection,
         )
         server.ssl_context = ssl_context
         # The connect request is answered within the connect timeout; once connected,
